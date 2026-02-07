@@ -33,6 +33,15 @@ describe('log', () => {
     expect(sanitizeSessionId('hello world!')).toBe('hello_world_')
   })
 
+  test('sanitizeSessionId truncates to 200 chars', () => {
+    const long = 'a'.repeat(250)
+    expect(sanitizeSessionId(long).length).toBe(200)
+    // Exactly 200 chars should not be truncated
+    expect(sanitizeSessionId('b'.repeat(200)).length).toBe(200)
+    // 199 chars should remain 199
+    expect(sanitizeSessionId('c'.repeat(199)).length).toBe(199)
+  })
+
   test('appendEvent creates file and appends lines', () => {
     const sessionId = 'test-session'
 
