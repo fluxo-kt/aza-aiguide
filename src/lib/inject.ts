@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import type { ChildProcess } from 'child_process';
 
 export type InjectionMethod = 'tmux' | 'screen' | 'osascript' | 'disabled';
@@ -53,6 +53,26 @@ export function resolveTerminalProcessName(): string {
     'kitty': 'kitty',
   };
   return mapping[termProgram] ?? '';
+}
+
+/**
+ * Tests whether macOS Accessibility permissions are granted for osascript.
+ * Runs a lightweight probe command against System Events.
+ * Returns true if Accessibility is available, false otherwise.
+ * Always returns true on non-macOS platforms (not applicable).
+ */
+export function checkAccessibilityPermission(): boolean {
+  if (process.platform !== 'darwin') return true;
+
+  try {
+    execSync(
+      'osascript -e \'tell application "System Events" to return name of first process\'',
+      { timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

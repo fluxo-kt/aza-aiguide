@@ -4,6 +4,7 @@ exports.isValidPaneId = isValidPaneId;
 exports.sanitizeForShell = sanitizeForShell;
 exports.sanitizeForAppleScript = sanitizeForAppleScript;
 exports.resolveTerminalProcessName = resolveTerminalProcessName;
+exports.checkAccessibilityPermission = checkAccessibilityPermission;
 exports.detectInjectionMethod = detectInjectionMethod;
 exports.buildInjectionCommand = buildInjectionCommand;
 exports.spawnDetached = spawnDetached;
@@ -50,6 +51,23 @@ function resolveTerminalProcessName() {
         'kitty': 'kitty',
     };
     return mapping[termProgram] ?? '';
+}
+/**
+ * Tests whether macOS Accessibility permissions are granted for osascript.
+ * Runs a lightweight probe command against System Events.
+ * Returns true if Accessibility is available, false otherwise.
+ * Always returns true on non-macOS platforms (not applicable).
+ */
+function checkAccessibilityPermission() {
+    if (process.platform !== 'darwin')
+        return true;
+    try {
+        (0, child_process_1.execSync)('osascript -e \'tell application "System Events" to return name of first process\'', { timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] });
+        return true;
+    }
+    catch {
+        return false;
+    }
 }
 /**
  * Detects the available injection method based on environment variables and platform.

@@ -6,7 +6,7 @@ import { homedir } from 'os'
 import { loadConfig } from './lib/config'
 import type { TavConfig } from './lib/config'
 import { ensureStateDir, getLogPath, cleanOldSessions, sanitizeSessionId } from './lib/log'
-import { detectInjectionMethod } from './lib/inject'
+import { detectInjectionMethod, checkAccessibilityPermission } from './lib/inject'
 import type { InjectionConfig } from './lib/inject'
 
 interface StdinData {
@@ -20,6 +20,7 @@ interface SessionConfig {
   injectionMethod: string
   injectionTarget: string
   startedAt: number
+  disabledReason?: string
 }
 
 function readStdin(): Promise<string> {
@@ -55,7 +56,24 @@ async function main(): Promise<void> {
     }
 
     // Detect injection method
-    const injection: InjectionConfig = detectInjectionMethod()
+    let injection: InjectionConfig = detectInjectionMethod()
+    let disabledReason: string | undefined
+
+    // If osascript detected, verify Accessibility permissions are granted.
+    // Without Accessibility, osascript silently fails — downgrade to disabled
+    // with a clear warning so the user knows what to do.
+    if (injection.method === 'osascript') {
+      const hasAccess = checkAccessibilityPermission()
+      if (!hasAccess) {
+        disabledReason = 'macOS Accessibility permissions not granted'
+        injection = { method: 'disabled', target: '' }
+        console.error(
+          'tav: macOS Accessibility permissions required for automatic bookmarks.\n' +
+          'Grant permission: System Settings > Privacy & Security > Accessibility > Enable your terminal app.\n' +
+          'Until then, you can still type \u00B7 manually to create bookmark anchor points.'
+        )
+      }
+    }
 
     // Ensure state directory exists
     ensureStateDir()
@@ -68,7 +86,8 @@ async function main(): Promise<void> {
       sessionId,
       injectionMethod: injection.method,
       injectionTarget: injection.target,
-      startedAt: Date.now()
+      startedAt: Date.now(),
+      ...(disabledReason ? { disabledReason } : {})
     }
 
     const sessionConfigPath = join(homedir(), '.claude', 'tav', 'state', `${sanitizedId}.json`)
