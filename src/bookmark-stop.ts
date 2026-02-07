@@ -161,5 +161,11 @@ async function main(): Promise<void> {
 }
 
 if (require.main === module) {
-  main()
+  main().then(
+    () => process.exit(0),
+    () => {
+      console.log(JSON.stringify({ continue: true }))
+      process.exit(0)
+    }
+  )
 }
