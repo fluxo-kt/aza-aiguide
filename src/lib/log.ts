@@ -108,7 +108,7 @@ export function parseLog(sessionId: string, stateDir: string = DEFAULT_STATE_DIR
 
   const estimatedTokens = Math.floor(totalCharCount / 4)
   const elapsedSeconds = firstTimestamp > 0
-    ? Math.floor((lastTimestamp - firstTimestamp) / 1000)
+    ? Math.floor((Date.now() - firstTimestamp) / 1000)
     : 0
 
   const lastLineIsBookmark = lines.length > 0 && lines[lines.length - 1].startsWith('B ')

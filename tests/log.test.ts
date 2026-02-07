@@ -2,13 +2,11 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdirSync, rmSync, writeFileSync, utimesSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import type { LogMetrics } from '../src/lib/log'
 import {
   sanitizeSessionId,
   appendEvent,
   parseLog,
-  cleanOldSessions,
-  getLogPath
+  cleanOldSessions
 } from '../src/lib/log'
 
 describe('log', () => {
@@ -100,16 +98,17 @@ describe('log', () => {
     expect(metrics.estimatedTokens).toBe(350)  // (400 + 800 + 200) / 4
   })
 
-  test('parseLog calculates elapsedSeconds', () => {
+  test('parseLog calculates elapsedSeconds from first activity to now', () => {
     const sessionId = 'elapsed-test'
-    const startTime = 1000000
-    const endTime = 1005000  // 5 seconds later
+    const fiveSecondsAgo = Date.now() - 5000
 
-    appendEvent(sessionId, `T ${startTime} 100`, testDir)
-    appendEvent(sessionId, `A ${endTime} 200`, testDir)
+    appendEvent(sessionId, `T ${fiveSecondsAgo} 100`, testDir)
+    appendEvent(sessionId, `A ${Date.now()} 200`, testDir)
 
     const metrics = parseLog(sessionId, testDir)
-    expect(metrics.elapsedSeconds).toBe(5)
+    // elapsedSeconds = now - firstTimestamp (per plan spec)
+    expect(metrics.elapsedSeconds).toBeGreaterThanOrEqual(4)
+    expect(metrics.elapsedSeconds).toBeLessThanOrEqual(7)
   })
 
   test('parseLog tracks lastInjectionAt and lastBookmarkAt', () => {
