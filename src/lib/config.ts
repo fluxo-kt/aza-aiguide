@@ -25,11 +25,11 @@ export const DEFAULT_CONFIG: TavConfig = {
     enabled: true,
     marker: '\u00B7', // middle dot
     thresholds: {
-      minTokens: 10000,
+      minTokens: 6000,
       minToolCalls: 15,
-      minSeconds: 300,
-      agentBurstThreshold: 5,
-      cooldownSeconds: 30,
+      minSeconds: 120,
+      agentBurstThreshold: 4,
+      cooldownSeconds: 25,
     },
   },
 }

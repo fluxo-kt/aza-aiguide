@@ -33,17 +33,17 @@ Each bookmark costs ~50 tokens. In a 200K-token session, 10 bookmarks = 0.25% ov
 
 | Threshold | Default | Description |
 |-----------|---------|-------------|
-| `minTokens` | 10,000 | Estimated tokens since last bookmark |
+| `minTokens` | 6,000 | Estimated tokens since last bookmark |
 | `minToolCalls` | 15 | Tool calls since last bookmark |
-| `minSeconds` | 300 | Seconds since first activity after last bookmark |
-| `agentBurstThreshold` | 5 | Agent returns without a bookmark (burst protection) |
-| `cooldownSeconds` | 30 | Minimum gap between bookmarks |
+| `minSeconds` | 120 | Seconds since first activity after last bookmark |
+| `agentBurstThreshold` | 4 | Agent returns without a bookmark (burst protection) |
+| `cooldownSeconds` | 25 | Minimum gap between bookmarks |
 
 ### Feedback loop prevention
 
 Three independent barriers make infinite loops structurally impossible:
 
-1. **Cooldown** — 30s minimum between injection attempts
+1. **Cooldown** — 25s minimum between injection attempts
 2. **Counter reset** — all metrics reset to zero after each bookmark
 3. **Bookmark-response skip** — if the last log entry is a bookmark, no new thresholds can fire (no activity happened)
 
@@ -57,11 +57,11 @@ Optional. tav works with sensible defaults out of the box. To customise, create 
     "enabled": true,
     "marker": "\u00B7",
     "thresholds": {
-      "minTokens": 10000,
+      "minTokens": 6000,
       "minToolCalls": 15,
-      "minSeconds": 300,
-      "agentBurstThreshold": 5,
-      "cooldownSeconds": 30
+      "minSeconds": 120,
+      "agentBurstThreshold": 4,
+      "cooldownSeconds": 25
     }
   }
 }

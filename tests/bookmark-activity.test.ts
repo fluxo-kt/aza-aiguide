@@ -155,7 +155,7 @@ describe('bookmark-activity', () => {
         injectionTarget: '%1'
       })
 
-      // Add 2 A lines (threshold is 5)
+      // Add 2 A lines (threshold is 4)
       const data = { output: 'test' }
       handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
       const result = handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
@@ -177,12 +177,12 @@ describe('bookmark-activity', () => {
 
       const data = { output: 'test' }
 
-      // Add 4 A lines first
-      for (let i = 0; i < 4; i++) {
+      // Add 3 A lines first
+      for (let i = 0; i < 3; i++) {
         handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
       }
 
-      // 5th call should trigger injection (threshold is 5)
+      // 4th call should trigger injection (threshold is 4)
       const result = handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
 
       expect(result).toBe(true)
@@ -200,7 +200,7 @@ describe('bookmark-activity', () => {
         injectionTarget: '%1'
       })
 
-      // Manually add an I line within cooldown period (30 seconds default)
+      // Manually add an I line within cooldown period (25 seconds default)
       const logPath = getLogPath(TEST_SESSION_ID, logDir)
       const nowMs = Date.now()
       writeFileSync(logPath, `I ${nowMs}\n`)
