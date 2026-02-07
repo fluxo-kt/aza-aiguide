@@ -119,10 +119,10 @@ function buildInjectionCommand(method, target, marker) {
             // macOS keystroke automation — split into separate keystroke + Enter for reliability.
             // When target is set (e.g. "Warp", "iTerm2"), use process-targeted injection
             // which is critical for terminals with custom input editors like Warp Terminal.
-            // Both target and marker are sanitised for AppleScript double-quoted strings
-            // to prevent injection via crafted config or session state.
-            const asTarget = sanitizeForAppleScript(target);
-            const asMarker = sanitizeForAppleScript(marker);
+            // Double sanitisation: AppleScript first (escape " and \), then shell (escape ')
+            // to prevent both AppleScript injection and shell single-quote breakout.
+            const asTarget = sanitizeForShell(sanitizeForAppleScript(target));
+            const asMarker = sanitizeForShell(sanitizeForAppleScript(marker));
             const tellTarget = asTarget
                 ? `tell application "System Events" to tell process "${asTarget}"`
                 : 'tell application "System Events"';

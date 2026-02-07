@@ -261,6 +261,16 @@ describe('inject utilities', () => {
       expect(command).toContain('key code 36');
     });
 
+    test('osascript command prevents single-quote shell breakout', () => {
+      // If marker contains a single quote, it must be escaped for the shell context
+      const command = buildInjectionCommand('osascript', 'Warp', "test'marker");
+      expect(command).not.toBeNull();
+      // The single quote should be escaped via sanitizeForShell (becomes '\'')
+      expect(command).not.toContain("test'marker");
+      expect(command).toContain('test');
+      expect(command).toContain('marker');
+    });
+
     test('returns null for disabled', () => {
       const command = buildInjectionCommand('disabled', '', '📖');
       expect(command).toBeNull();
