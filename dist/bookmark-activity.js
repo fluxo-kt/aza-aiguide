@@ -33,14 +33,28 @@ function getSessionConfig(sessionId, stateDir) {
         return null;
     }
 }
+/**
+ * Measures the size of a hook data field in characters.
+ * Handles strings directly, serialises objects, and defaults to 0 for nullish values.
+ */
+function measureSize(value) {
+    if (typeof value === 'string')
+        return value.length;
+    if (value == null)
+        return 0;
+    try {
+        return JSON.stringify(value).length;
+    }
+    catch {
+        return 0;
+    }
+}
 function handlePostToolUse(sessionId, data, logDir) {
-    const toolOutput = (data.tool_response || data.toolResponse || data.toolOutput || '');
-    const charCount = toolOutput.length;
+    const charCount = measureSize(data.tool_response ?? data.toolResponse ?? data.toolOutput);
     (0, log_1.appendEvent)(sessionId, `T ${Date.now()} ${charCount}`, logDir);
 }
 function handleSubagentStop(sessionId, data, logDir, sessionStateDir) {
-    const output = (data.output || '');
-    const charCount = output.length;
+    const charCount = measureSize(data.output);
     (0, log_1.appendEvent)(sessionId, `A ${Date.now()} ${charCount}`, logDir);
     const config = (0, config_1.loadConfig)();
     const metrics = (0, log_1.parseLog)(sessionId, logDir);
@@ -76,7 +90,6 @@ async function main() {
         if (!sessionId) {
             console.log(JSON.stringify({ continue: true }));
             process.exit(0);
-            return;
         }
         if (eventName === 'PostToolUse') {
             handlePostToolUse(sessionId, data);

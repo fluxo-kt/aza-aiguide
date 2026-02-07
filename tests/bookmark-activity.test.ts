@@ -101,6 +101,35 @@ describe('bookmark-activity', () => {
       const log = readLog(TEST_SESSION_ID, logDir)
       expect(log).toContain('T ')
     })
+
+    test('handles object tool_response (non-string)', () => {
+      const data = { tool_response: { content: 'file contents here' } }
+      handlePostToolUse(TEST_SESSION_ID, data, logDir)
+
+      const log = readLog(TEST_SESSION_ID, logDir)
+      const lines = log.trim().split('\n')
+      const lastLine = lines[lines.length - 1]
+
+      // Should write a numeric charCount, not "undefined"
+      expect(lastLine).toMatch(/^T \d+ \d+$/)
+      expect(lastLine).not.toContain('undefined')
+
+      const parts = lastLine.split(' ')
+      const charCount = parseInt(parts[2], 10)
+      // JSON.stringify({content:"file contents here"}).length = 34
+      expect(charCount).toBeGreaterThan(0)
+    })
+
+    test('handles null/undefined tool_response', () => {
+      const data = { tool_response: null }
+      handlePostToolUse(TEST_SESSION_ID, data, logDir)
+
+      const log = readLog(TEST_SESSION_ID, logDir)
+      const lines = log.trim().split('\n')
+      const lastLine = lines[lines.length - 1]
+
+      expect(lastLine).toMatch(/^T \d+ 0$/)
+    })
   })
 
   describe('handleSubagentStop', () => {
