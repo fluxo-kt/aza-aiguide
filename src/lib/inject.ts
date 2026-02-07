@@ -26,13 +26,25 @@ export function sanitizeForShell(text: string): string {
 /**
  * Resolves the macOS process name for the current terminal emulator.
  * Used for targeted AppleScript keystroke injection.
+ *
+ * Returns empty string for unrecognised terminals — the caller falls back
+ * to a generic System Events keystroke which still works in most cases.
+ * If injection fails entirely (IDE terminals, missing Accessibility),
+ * the user can always type · manually.
  */
 export function resolveTerminalProcessName(): string {
   const termProgram = process.env.TERM_PROGRAM || '';
-  if (termProgram === 'WarpTerminal') return 'Warp';
-  if (termProgram === 'iTerm.app') return 'iTerm2';
-  if (termProgram === 'Apple_Terminal') return 'Terminal';
-  return '';
+  const mapping: Record<string, string> = {
+    'WarpTerminal': 'Warp',
+    'iTerm.app': 'iTerm2',
+    'Apple_Terminal': 'Terminal',
+    'ghostty': 'ghostty',
+    'vscode': 'Code',
+    'Hyper': 'Hyper',
+    'Alacritty': 'Alacritty',
+    'kitty': 'kitty',
+  };
+  return mapping[termProgram] ?? '';
 }
 
 /**

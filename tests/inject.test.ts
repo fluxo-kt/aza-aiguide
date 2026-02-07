@@ -139,23 +139,32 @@ describe('inject utilities', () => {
   });
 
   describe('resolveTerminalProcessName', () => {
-    test('resolves WarpTerminal to Warp', () => {
-      process.env.TERM_PROGRAM = 'WarpTerminal';
-      expect(resolveTerminalProcessName()).toBe('Warp');
-    });
-
-    test('resolves iTerm.app to iTerm2', () => {
-      process.env.TERM_PROGRAM = 'iTerm.app';
-      expect(resolveTerminalProcessName()).toBe('iTerm2');
-    });
-
-    test('resolves Apple_Terminal to Terminal', () => {
-      process.env.TERM_PROGRAM = 'Apple_Terminal';
-      expect(resolveTerminalProcessName()).toBe('Terminal');
+    test('resolves known terminals to process names', () => {
+      const cases: [string, string][] = [
+        ['WarpTerminal', 'Warp'],
+        ['iTerm.app', 'iTerm2'],
+        ['Apple_Terminal', 'Terminal'],
+        ['ghostty', 'ghostty'],
+        ['vscode', 'Code'],
+        ['Hyper', 'Hyper'],
+        ['Alacritty', 'Alacritty'],
+        ['kitty', 'kitty'],
+      ];
+      for (const [termProgram, expected] of cases) {
+        process.env.TERM_PROGRAM = termProgram;
+        expect(resolveTerminalProcessName()).toBe(expected);
+      }
     });
 
     test('returns empty string for unknown terminal', () => {
       process.env.TERM_PROGRAM = 'SomeOtherTerminal';
+      expect(resolveTerminalProcessName()).toBe('');
+    });
+
+    test('returns empty string for JetBrains embedded terminal', () => {
+      // IDE terminals get empty string — falls back to generic osascript.
+      // Injection may not work in IDE terminals; user types · manually.
+      process.env.TERM_PROGRAM = 'JetBrains-JediTerm';
       expect(resolveTerminalProcessName()).toBe('');
     });
 
