@@ -62,7 +62,7 @@ function evaluateBookmark(data, config, metrics, injectionMethod) {
 async function main() {
     try {
         const config = (0, config_1.loadConfig)();
-        const input = await (0, stdin_1.readStdin)(5000);
+        const input = await (0, stdin_1.readStdin)(4000);
         const data = JSON.parse(input);
         // Normalize field names (camelCase variants)
         const sessionId = (data.session_id || data.sessionId);

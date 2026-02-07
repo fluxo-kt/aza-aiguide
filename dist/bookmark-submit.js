@@ -32,7 +32,7 @@ function processBookmark(userPrompt, marker) {
 }
 async function main() {
     try {
-        const input = await (0, stdin_1.readStdin)(5000);
+        const input = await (0, stdin_1.readStdin)(2500);
         const data = JSON.parse(input);
         const sessionId = data.session_id ?? data.sessionId ?? 'unknown';
         const userPrompt = data.prompt ?? data.user_prompt ?? data.userPrompt ?? '';

@@ -80,7 +80,7 @@ export function evaluateBookmark(
 async function main(): Promise<void> {
   try {
     const config = loadConfig()
-    const input = await readStdin(5000)
+    const input = await readStdin(4000)
     const data: Record<string, unknown> = JSON.parse(input)
 
     // Normalize field names (camelCase variants)

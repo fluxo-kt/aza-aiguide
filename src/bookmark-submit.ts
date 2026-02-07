@@ -56,7 +56,7 @@ export function processBookmark(
 
 async function main(): Promise<void> {
   try {
-    const input = await readStdin(5000)
+    const input = await readStdin(2500)
     const data: StdinData = JSON.parse(input)
 
     const sessionId = data.session_id ?? data.sessionId ?? 'unknown'
