@@ -1,0 +1,64 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '\"${BUN:-bun}\" run \"${CLAUDE_PLUGIN_ROOT}/src/session-start.ts\" 2>/dev/null || node \"${CLAUDE_PLUGIN_ROOT}/dist/src/session-start.js\"'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '\"${BUN:-bun}\" run \"${CLAUDE_PLUGIN_ROOT}/src/bookmark-activity.ts\" 2>/dev/null || node \"${CLAUDE_PLUGIN_ROOT}/dist/src/bookmark-activity.js\"'",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '\"${BUN:-bun}\" run \"${CLAUDE_PLUGIN_ROOT}/src/bookmark-activity.ts\" 2>/dev/null || node \"${CLAUDE_PLUGIN_ROOT}/dist/src/bookmark-activity.js\"'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '\"${BUN:-bun}\" run \"${CLAUDE_PLUGIN_ROOT}/src/bookmark-stop.ts\" 2>/dev/null || node \"${CLAUDE_PLUGIN_ROOT}/dist/src/bookmark-stop.js\"'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '\"${BUN:-bun}\" run \"${CLAUDE_PLUGIN_ROOT}/src/bookmark-submit.ts\" 2>/dev/null || node \"${CLAUDE_PLUGIN_ROOT}/dist/src/bookmark-submit.js\"'",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}
