@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import {
   isValidPaneId,
   sanitizeForShell,
+  resolveTerminalProcessName,
   detectInjectionMethod,
   buildInjectionCommand,
   spawnDetached,
@@ -12,11 +13,13 @@ describe('inject utilities', () => {
   let originalTmux: string | undefined;
   let originalTmuxPane: string | undefined;
   let originalSty: string | undefined;
+  let originalTermProgram: string | undefined;
 
   beforeEach(() => {
     originalTmux = process.env.TMUX;
     originalTmuxPane = process.env.TMUX_PANE;
     originalSty = process.env.STY;
+    originalTermProgram = process.env.TERM_PROGRAM;
   });
 
   afterEach(() => {
@@ -35,6 +38,11 @@ describe('inject utilities', () => {
       process.env.STY = originalSty;
     } else {
       delete process.env.STY;
+    }
+    if (originalTermProgram !== undefined) {
+      process.env.TERM_PROGRAM = originalTermProgram;
+    } else {
+      delete process.env.TERM_PROGRAM;
     }
   });
 
@@ -86,10 +94,26 @@ describe('inject utilities', () => {
       expect(result.target).toBe('12345.pts-0.hostname');
     });
 
-    test('returns osascript on darwin with no tmux/screen', () => {
+    test('returns osascript on darwin with terminal process name as target', () => {
       delete process.env.TMUX;
       delete process.env.TMUX_PANE;
       delete process.env.STY;
+      process.env.TERM_PROGRAM = 'WarpTerminal';
+
+      const result = detectInjectionMethod();
+      if (process.platform === 'darwin') {
+        expect(result.method).toBe('osascript');
+        expect(result.target).toBe('Warp');
+      } else {
+        expect(result.method).toBe('disabled');
+      }
+    });
+
+    test('returns osascript with empty target for unknown terminal', () => {
+      delete process.env.TMUX;
+      delete process.env.TMUX_PANE;
+      delete process.env.STY;
+      delete process.env.TERM_PROGRAM;
 
       const result = detectInjectionMethod();
       if (process.platform === 'darwin') {
@@ -114,6 +138,33 @@ describe('inject utilities', () => {
     });
   });
 
+  describe('resolveTerminalProcessName', () => {
+    test('resolves WarpTerminal to Warp', () => {
+      process.env.TERM_PROGRAM = 'WarpTerminal';
+      expect(resolveTerminalProcessName()).toBe('Warp');
+    });
+
+    test('resolves iTerm.app to iTerm2', () => {
+      process.env.TERM_PROGRAM = 'iTerm.app';
+      expect(resolveTerminalProcessName()).toBe('iTerm2');
+    });
+
+    test('resolves Apple_Terminal to Terminal', () => {
+      process.env.TERM_PROGRAM = 'Apple_Terminal';
+      expect(resolveTerminalProcessName()).toBe('Terminal');
+    });
+
+    test('returns empty string for unknown terminal', () => {
+      process.env.TERM_PROGRAM = 'SomeOtherTerminal';
+      expect(resolveTerminalProcessName()).toBe('');
+    });
+
+    test('returns empty string when TERM_PROGRAM is unset', () => {
+      delete process.env.TERM_PROGRAM;
+      expect(resolveTerminalProcessName()).toBe('');
+    });
+  });
+
   describe('buildInjectionCommand', () => {
     test('returns tmux command with quoted target and marker', () => {
       const command = buildInjectionCommand('tmux', '%0', '📖');
@@ -134,14 +185,24 @@ describe('inject utilities', () => {
       expect(command).toContain('\\n');
     });
 
-    test('returns osascript command', () => {
+    test('returns osascript command with generic targeting', () => {
       const command = buildInjectionCommand('osascript', '', '📖');
       expect(command).not.toBeNull();
       expect(command).toContain('osascript');
       expect(command).toContain('tell application "System Events"');
       expect(command).toContain('keystroke');
       expect(command).toContain('📖');
-      expect(command).toContain('return');
+      // Separate keystroke and Enter commands
+      expect(command).toContain('key code 36');
+    });
+
+    test('returns osascript command with process-targeted injection', () => {
+      const command = buildInjectionCommand('osascript', 'Warp', '📖');
+      expect(command).not.toBeNull();
+      expect(command).toContain('tell process "Warp"');
+      expect(command).toContain('keystroke');
+      expect(command).toContain('📖');
+      expect(command).toContain('key code 36');
     });
 
     test('returns null for disabled', () => {

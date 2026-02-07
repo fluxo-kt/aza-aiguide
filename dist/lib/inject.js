@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isValidPaneId = isValidPaneId;
 exports.sanitizeForShell = sanitizeForShell;
+exports.resolveTerminalProcessName = resolveTerminalProcessName;
 exports.detectInjectionMethod = detectInjectionMethod;
 exports.buildInjectionCommand = buildInjectionCommand;
 exports.spawnDetached = spawnDetached;
@@ -20,6 +21,20 @@ function sanitizeForShell(text) {
     return text.replace(/'/g, "'\\''");
 }
 /**
+ * Resolves the macOS process name for the current terminal emulator.
+ * Used for targeted AppleScript keystroke injection.
+ */
+function resolveTerminalProcessName() {
+    const termProgram = process.env.TERM_PROGRAM || '';
+    if (termProgram === 'WarpTerminal')
+        return 'Warp';
+    if (termProgram === 'iTerm.app')
+        return 'iTerm2';
+    if (termProgram === 'Apple_Terminal')
+        return 'Terminal';
+    return '';
+}
+/**
  * Detects the available injection method based on environment variables and platform.
  */
 function detectInjectionMethod() {
@@ -34,9 +49,10 @@ function detectInjectionMethod() {
     if (screenSession) {
         return { method: 'screen', target: screenSession };
     }
-    // Check for macOS
+    // Check for macOS — store the terminal process name in target for
+    // AppleScript process-targeted injection (critical for Warp Terminal)
     if (process.platform === 'darwin') {
-        return { method: 'osascript', target: '' };
+        return { method: 'osascript', target: resolveTerminalProcessName() };
     }
     // No method available
     return { method: 'disabled', target: '' };
@@ -64,9 +80,15 @@ function buildInjectionCommand(method, target, marker) {
             // Use stuff command with \\n for newline (screen interprets \n as newline)
             // All values single-quoted for defense-in-depth
             return `sleep 1.5 && screen -S '${sanitizedTarget}' -X stuff '${sanitizedMarker}\\n'`;
-        case 'osascript':
-            // macOS keystroke automation — marker placed in AppleScript double-quotes
-            return `sleep 1.5 && osascript -e 'tell application "System Events" to keystroke "${sanitizedMarker}" & return'`;
+        case 'osascript': {
+            // macOS keystroke automation — split into separate keystroke + Enter for reliability.
+            // When target is set (e.g. "Warp", "iTerm2"), use process-targeted injection
+            // which is critical for terminals with custom input editors like Warp Terminal.
+            const tellTarget = sanitizedTarget
+                ? `tell application "System Events" to tell process "${sanitizedTarget}"`
+                : 'tell application "System Events"';
+            return `sleep 1.5 && osascript -e '${tellTarget} to keystroke "${sanitizedMarker}"' && sleep 0.2 && osascript -e '${tellTarget} to key code 36'`;
+        }
         default:
             return null;
     }

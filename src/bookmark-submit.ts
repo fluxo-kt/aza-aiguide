@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
-import type { LogMetrics } from './lib/log'
 import { loadConfig } from './lib/config'
-import { parseLog, appendEvent } from './lib/log'
+import { appendEvent } from './lib/log'
 
 interface StdinData {
   hook_event_name?: string
@@ -23,12 +22,8 @@ interface HookOutput {
 
 export function processBookmark(
   userPrompt: string,
-  sessionId: string,
-  marker: string,
-  lastInjectionAt: number,
-  now?: number
+  marker: string
 ): { isBookmark: boolean; output: HookOutput } {
-  const currentTime = now ?? Date.now()
   const trimmedPrompt = userPrompt.trim()
 
   // Not the marker — pass through
@@ -39,18 +34,11 @@ export function processBookmark(
     }
   }
 
-  // Anti-collision check: recent injection within 10 seconds
-  const hasRecentInjection = lastInjectionAt > 0 && currentTime - lastInjectionAt < 10000
-
-  if (!hasRecentInjection) {
-    // User typed marker manually — pass through as real input
-    return {
-      isBookmark: false,
-      output: { continue: true }
-    }
-  }
-
-  // Valid bookmark detected
+  // Marker detected — always treat as bookmark.
+  // The marker (· U+00B7 middle dot) is sufficiently uncommon that false
+  // positives are negligible. Removing the anti-collision check also enables
+  // manual bookmarks when terminal injection is unavailable — the user can
+  // simply type · to create a rewind anchor point at any time.
   return {
     isBookmark: true,
     output: {
@@ -94,15 +82,7 @@ async function main(): Promise<void> {
     const config = loadConfig()
     const marker = config.bookmarks?.marker ?? '\u00B7'
 
-    // Parse log to get last injection time
-    const metrics: LogMetrics = parseLog(sessionId)
-
-    const { isBookmark, output } = processBookmark(
-      userPrompt,
-      sessionId,
-      marker,
-      metrics.lastInjectionAt
-    )
+    const { isBookmark, output } = processBookmark(userPrompt, marker)
 
     // If bookmark confirmed, append B line to log
     if (isBookmark) {

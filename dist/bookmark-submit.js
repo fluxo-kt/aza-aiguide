@@ -4,8 +4,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.processBookmark = processBookmark;
 const config_1 = require("./lib/config");
 const log_1 = require("./lib/log");
-function processBookmark(userPrompt, sessionId, marker, lastInjectionAt, now) {
-    const currentTime = now ?? Date.now();
+function processBookmark(userPrompt, marker) {
     const trimmedPrompt = userPrompt.trim();
     // Not the marker — pass through
     if (trimmedPrompt !== marker) {
@@ -14,16 +13,11 @@ function processBookmark(userPrompt, sessionId, marker, lastInjectionAt, now) {
             output: { continue: true }
         };
     }
-    // Anti-collision check: recent injection within 10 seconds
-    const hasRecentInjection = lastInjectionAt > 0 && currentTime - lastInjectionAt < 10000;
-    if (!hasRecentInjection) {
-        // User typed marker manually — pass through as real input
-        return {
-            isBookmark: false,
-            output: { continue: true }
-        };
-    }
-    // Valid bookmark detected
+    // Marker detected — always treat as bookmark.
+    // The marker (· U+00B7 middle dot) is sufficiently uncommon that false
+    // positives are negligible. Removing the anti-collision check also enables
+    // manual bookmarks when terminal injection is unavailable — the user can
+    // simply type · to create a rewind anchor point at any time.
     return {
         isBookmark: true,
         output: {
@@ -60,9 +54,7 @@ async function main() {
         const userPrompt = data.user_prompt ?? data.userPrompt ?? '';
         const config = (0, config_1.loadConfig)();
         const marker = config.bookmarks?.marker ?? '\u00B7';
-        // Parse log to get last injection time
-        const metrics = (0, log_1.parseLog)(sessionId);
-        const { isBookmark, output } = processBookmark(userPrompt, sessionId, marker, metrics.lastInjectionAt);
+        const { isBookmark, output } = processBookmark(userPrompt, marker);
         // If bookmark confirmed, append B line to log
         if (isBookmark) {
             (0, log_1.appendEvent)(sessionId, `B ${Date.now()}`);

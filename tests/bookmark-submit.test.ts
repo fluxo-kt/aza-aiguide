@@ -7,20 +7,16 @@ import * as os from 'node:os'
 
 describe('processBookmark', () => {
   const marker = '\u00B7'
-  const sessionId = 'test-session'
-  const now = Date.now()
 
-  test('detects bookmark marker with recent injection', () => {
-    const lastInjectionAt = now - 5000 // 5 seconds ago
-    const { isBookmark, output } = processBookmark('·', sessionId, marker, lastInjectionAt, now)
+  test('detects bookmark marker', () => {
+    const { isBookmark, output } = processBookmark('·', marker)
 
     expect(isBookmark).toBe(true)
     expect(output.continue).toBe(true)
   })
 
   test('returns additionalContext for bookmark', () => {
-    const lastInjectionAt = now - 5000
-    const { isBookmark, output } = processBookmark('·', sessionId, marker, lastInjectionAt, now)
+    const { isBookmark, output } = processBookmark('·', marker)
 
     expect(isBookmark).toBe(true)
     expect(output.hookSpecificOutput).toBeDefined()
@@ -30,26 +26,15 @@ describe('processBookmark', () => {
   })
 
   test('passes through non-marker messages', () => {
-    const lastInjectionAt = now - 5000
-    const { isBookmark, output } = processBookmark('hello', sessionId, marker, lastInjectionAt, now)
+    const { isBookmark, output } = processBookmark('hello', marker)
 
     expect(isBookmark).toBe(false)
     expect(output.continue).toBe(true)
     expect(output.hookSpecificOutput).toBeUndefined()
   })
 
-  test('passes through when marker matches but no recent injection', () => {
-    const lastInjectionAt = 0 // No injection ever
-    const { isBookmark, output } = processBookmark('·', sessionId, marker, lastInjectionAt, now)
-
-    expect(isBookmark).toBe(false)
-    expect(output.continue).toBe(true)
-    expect(output.hookSpecificOutput).toBeUndefined()
-  })
-
-  test('passes through when injection is too old', () => {
-    const lastInjectionAt = now - 15000 // 15 seconds ago (> 10s threshold)
-    const { isBookmark, output } = processBookmark('·', sessionId, marker, lastInjectionAt, now)
+  test('passes through empty string', () => {
+    const { isBookmark, output } = processBookmark('', marker)
 
     expect(isBookmark).toBe(false)
     expect(output.continue).toBe(true)
@@ -57,47 +42,39 @@ describe('processBookmark', () => {
   })
 
   test('handles trimming of marker', () => {
-    const lastInjectionAt = now - 5000
-    const { isBookmark, output } = processBookmark(' · ', sessionId, marker, lastInjectionAt, now)
+    const { isBookmark, output } = processBookmark(' · ', marker)
 
     expect(isBookmark).toBe(true)
     expect(output.continue).toBe(true)
   })
 
+  test('always treats marker as bookmark regardless of timing', () => {
+    // Manual bookmarks should work — no anti-collision gating
+    const { isBookmark } = processBookmark('·', marker)
+    expect(isBookmark).toBe(true)
+  })
+
   test('returns continue:true in all cases', () => {
     const testCases = [
-      { prompt: '·', lastInjectionAt: now - 5000 }, // bookmark
-      { prompt: 'hello', lastInjectionAt: now - 5000 }, // not marker
-      { prompt: '·', lastInjectionAt: 0 }, // no injection
-      { prompt: '·', lastInjectionAt: now - 15000 }, // old injection
+      { prompt: '·' },    // bookmark
+      { prompt: 'hello' }, // not marker
+      { prompt: '' },      // empty
+      { prompt: '··' },    // double marker (not exact match)
     ]
 
-    for (const { prompt, lastInjectionAt } of testCases) {
-      const { output } = processBookmark(prompt, sessionId, marker, lastInjectionAt, now)
+    for (const { prompt } of testCases) {
+      const { output } = processBookmark(prompt, marker)
       expect(output.continue).toBe(true)
     }
   })
 
   test('uses custom marker from config', () => {
     const customMarker = '###'
-    const lastInjectionAt = now - 5000
 
-    const { isBookmark: isBookmark1 } = processBookmark(
-      '###',
-      sessionId,
-      customMarker,
-      lastInjectionAt,
-      now
-    )
+    const { isBookmark: isBookmark1 } = processBookmark('###', customMarker)
     expect(isBookmark1).toBe(true)
 
-    const { isBookmark: isBookmark2 } = processBookmark(
-      '·',
-      sessionId,
-      customMarker,
-      lastInjectionAt,
-      now
-    )
+    const { isBookmark: isBookmark2 } = processBookmark('·', customMarker)
     expect(isBookmark2).toBe(false)
   })
 })
@@ -125,18 +102,12 @@ describe('bookmark-submit integration', () => {
     const sessionId = 'integration-test'
     const logPath = path.join(tempDir, `${sessionId}.log`)
 
-    // Simulate recent injection
-    const injectionTime = Date.now() - 5000
-    appendEvent(sessionId, `I ${injectionTime}`, tempDir)
-
-    // Verify I line exists
-    const beforeContent = fs.readFileSync(logPath, 'utf8')
-    expect(beforeContent).toContain('I ')
+    // Add some activity first
+    appendEvent(sessionId, `T ${Date.now()} 500`, tempDir)
 
     // Process bookmark
     const marker = '\u00B7'
-    const lastInjectionAt = Date.now() - 5000
-    const { isBookmark } = processBookmark('·', sessionId, marker, lastInjectionAt)
+    const { isBookmark } = processBookmark('·', marker)
 
     expect(isBookmark).toBe(true)
 
@@ -149,7 +120,7 @@ describe('bookmark-submit integration', () => {
 
     const lines = afterContent.trim().split('\n')
     expect(lines.length).toBe(2)
-    expect(lines[0]).toMatch(/^I \d+$/)
+    expect(lines[0]).toMatch(/^T \d+ \d+$/)
     expect(lines[1]).toMatch(/^B \d+$/)
   })
 })
