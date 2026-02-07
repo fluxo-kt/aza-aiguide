@@ -11,7 +11,8 @@ const path_1 = require("path");
 const os_1 = require("os");
 const DEFAULT_STATE_DIR = (0, path_1.join)((0, os_1.homedir)(), '.claude', 'tav', 'state');
 function sanitizeSessionId(sessionId) {
-    return sessionId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    // Truncate to 200 chars to prevent ENAMETOOLONG (255 limit minus .json/.log suffix)
+    return sessionId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 200);
 }
 function getLogPath(sessionId, stateDir = DEFAULT_STATE_DIR) {
     return (0, path_1.join)(stateDir, `${sanitizeSessionId(sessionId)}.log`);

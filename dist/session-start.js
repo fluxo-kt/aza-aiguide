@@ -10,11 +10,13 @@ const inject_1 = require("./lib/inject");
 function readStdin() {
     return new Promise((resolve) => {
         let data = '';
+        const timer = setTimeout(() => { resolve(data); }, 3000);
         process.stdin.setEncoding('utf-8');
         process.stdin.on('data', (chunk) => { data += chunk; });
-        process.stdin.on('end', () => { resolve(data); });
-        // Safety timeout — never block
-        setTimeout(() => { resolve(data); }, 3000);
+        process.stdin.on('end', () => {
+            clearTimeout(timer);
+            resolve(data);
+        });
     });
 }
 async function main() {
@@ -64,9 +66,13 @@ async function main() {
         };
         const sessionConfigPath = (0, path_1.join)((0, os_1.homedir)(), '.claude', 'tav', 'state', `${sanitizedId}.json`);
         (0, fs_1.writeFileSync)(sessionConfigPath, JSON.stringify(sessionConfig, null, 2), 'utf-8');
-        // Create empty activity log
+        // Create empty activity log (exclusive create — if a concurrent hook
+        // already created it via appendEvent, don't truncate their data)
         const logPath = (0, log_1.getLogPath)(sessionId);
-        (0, fs_1.writeFileSync)(logPath, '', 'utf-8');
+        try {
+            (0, fs_1.writeFileSync)(logPath, '', { flag: 'wx' });
+        }
+        catch { /* already exists */ }
         // Clean old sessions (7 days)
         (0, log_1.cleanOldSessions)(7);
         // Output success

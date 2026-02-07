@@ -12,10 +12,13 @@ const os_1 = require("os");
 function readStdin() {
     return new Promise((resolve) => {
         let data = '';
+        const timer = setTimeout(() => { resolve(data); }, 2500);
         process.stdin.setEncoding('utf-8');
         process.stdin.on('data', (chunk) => { data += chunk; });
-        process.stdin.on('end', () => { resolve(data); });
-        setTimeout(() => { resolve(data); }, 2000);
+        process.stdin.on('end', () => {
+            clearTimeout(timer);
+            resolve(data);
+        });
     });
 }
 function getSessionConfig(sessionId, stateDir) {
@@ -54,7 +57,7 @@ function handlePostToolUse(sessionId, data, logDir) {
     (0, log_1.appendEvent)(sessionId, `T ${Date.now()} ${charCount}`, logDir);
 }
 function handleSubagentStop(sessionId, data, logDir, sessionStateDir) {
-    const charCount = measureSize(data.output);
+    const charCount = measureSize(data.output ?? data.result ?? data.response ?? data.agent_output);
     (0, log_1.appendEvent)(sessionId, `A ${Date.now()} ${charCount}`, logDir);
     const config = (0, config_1.loadConfig)();
     const metrics = (0, log_1.parseLog)(sessionId, logDir);
