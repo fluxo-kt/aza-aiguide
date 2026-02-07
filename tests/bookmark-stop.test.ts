@@ -134,7 +134,7 @@ describe('evaluateBookmark', () => {
     const config = DEFAULT_CONFIG
     const metrics = {
       ...defaultMetrics(),
-      agentReturns: 6 // >= 4
+      agentReturns: 6 // >= 3
     }
     const data = {}
     const result = evaluateBookmark(data, config, metrics, 'tmux')

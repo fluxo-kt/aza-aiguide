@@ -36,7 +36,7 @@ Each bookmark costs ~50 tokens. In a 200K-token session, 10 bookmarks = 0.25% ov
 | `minTokens` | 6,000 | Estimated tokens since last bookmark |
 | `minToolCalls` | 15 | Tool calls since last bookmark |
 | `minSeconds` | 120 | Seconds since first activity after last bookmark |
-| `agentBurstThreshold` | 4 | Agent returns without a bookmark (burst protection) |
+| `agentBurstThreshold` | 3 | Agent returns without a bookmark (burst protection) |
 | `cooldownSeconds` | 25 | Minimum gap between bookmarks |
 
 ### Feedback loop prevention
@@ -60,7 +60,7 @@ Optional. tav works with sensible defaults out of the box. To customise, create 
       "minTokens": 6000,
       "minToolCalls": 15,
       "minSeconds": 120,
-      "agentBurstThreshold": 4,
+      "agentBurstThreshold": 3,
       "cooldownSeconds": 25
     }
   }

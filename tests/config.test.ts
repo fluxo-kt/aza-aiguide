@@ -73,7 +73,7 @@ describe('config loader', () => {
     expect(DEFAULT_CONFIG.bookmarks.thresholds.minTokens).toBe(6000)
     expect(DEFAULT_CONFIG.bookmarks.thresholds.minToolCalls).toBe(15)
     expect(DEFAULT_CONFIG.bookmarks.thresholds.minSeconds).toBe(120)
-    expect(DEFAULT_CONFIG.bookmarks.thresholds.agentBurstThreshold).toBe(4)
+    expect(DEFAULT_CONFIG.bookmarks.thresholds.agentBurstThreshold).toBe(3)
     expect(DEFAULT_CONFIG.bookmarks.thresholds.cooldownSeconds).toBe(25)
   })
 })
