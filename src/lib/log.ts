@@ -15,7 +15,8 @@ export interface LogMetrics {
 }
 
 export function sanitizeSessionId(sessionId: string): string {
-  return sessionId.replace(/[^a-zA-Z0-9_-]/g, '_')
+  // Truncate to 200 chars to prevent ENAMETOOLONG (255 limit minus .json/.log suffix)
+  return sessionId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 200)
 }
 
 export function getLogPath(sessionId: string, stateDir: string = DEFAULT_STATE_DIR): string {

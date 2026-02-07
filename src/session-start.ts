@@ -26,11 +26,13 @@ interface SessionConfig {
 function readStdin(): Promise<string> {
   return new Promise((resolve) => {
     let data = ''
+    const timer = setTimeout(() => { resolve(data) }, 3000)
     process.stdin.setEncoding('utf-8')
     process.stdin.on('data', (chunk: string) => { data += chunk })
-    process.stdin.on('end', () => { resolve(data) })
-    // Safety timeout — never block
-    setTimeout(() => { resolve(data) }, 3000)
+    process.stdin.on('end', () => {
+      clearTimeout(timer)
+      resolve(data)
+    })
   })
 }
 
@@ -93,9 +95,10 @@ async function main(): Promise<void> {
     const sessionConfigPath = join(homedir(), '.claude', 'tav', 'state', `${sanitizedId}.json`)
     writeFileSync(sessionConfigPath, JSON.stringify(sessionConfig, null, 2), 'utf-8')
 
-    // Create empty activity log
+    // Create empty activity log (exclusive create — if a concurrent hook
+    // already created it via appendEvent, don't truncate their data)
     const logPath = getLogPath(sessionId)
-    writeFileSync(logPath, '', 'utf-8')
+    try { writeFileSync(logPath, '', { flag: 'wx' }) } catch { /* already exists */ }
 
     // Clean old sessions (7 days)
     cleanOldSessions(7)

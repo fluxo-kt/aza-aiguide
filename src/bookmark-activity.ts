@@ -31,10 +31,13 @@ interface HookEvent {
 function readStdin(): Promise<string> {
   return new Promise((resolve) => {
     let data = ''
+    const timer = setTimeout(() => { resolve(data) }, 2500)
     process.stdin.setEncoding('utf-8')
     process.stdin.on('data', (chunk: string) => { data += chunk })
-    process.stdin.on('end', () => { resolve(data) })
-    setTimeout(() => { resolve(data) }, 2000)
+    process.stdin.on('end', () => {
+      clearTimeout(timer)
+      resolve(data)
+    })
   })
 }
 
@@ -75,7 +78,7 @@ export function handlePostToolUse(sessionId: string, data: Record<string, unknow
 }
 
 export function handleSubagentStop(sessionId: string, data: Record<string, unknown>, logDir?: string, sessionStateDir?: string): boolean {
-  const charCount = measureSize(data.output)
+  const charCount = measureSize(data.output ?? data.result ?? data.response ?? data.agent_output)
   appendEvent(sessionId, `A ${Date.now()} ${charCount}`, logDir)
 
   const config = loadConfig()
