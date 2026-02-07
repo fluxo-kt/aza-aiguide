@@ -8,6 +8,7 @@ import type { TavConfig } from './lib/config'
 import { ensureStateDir, getLogPath, cleanOldSessions, sanitizeSessionId } from './lib/log'
 import { detectInjectionMethod, checkAccessibilityPermission } from './lib/inject'
 import type { InjectionConfig } from './lib/inject'
+import { readStdin } from './lib/stdin'
 
 interface StdinData {
   session_id?: string
@@ -23,23 +24,10 @@ interface SessionConfig {
   disabledReason?: string
 }
 
-function readStdin(): Promise<string> {
-  return new Promise((resolve) => {
-    let data = ''
-    const timer = setTimeout(() => { resolve(data) }, 3000)
-    process.stdin.setEncoding('utf-8')
-    process.stdin.on('data', (chunk: string) => { data += chunk })
-    process.stdin.on('end', () => {
-      clearTimeout(timer)
-      resolve(data)
-    })
-  })
-}
-
 async function main(): Promise<void> {
   try {
-    // Read stdin
-    const stdinRaw = await readStdin()
+    // Read stdin (3s timeout — SessionStart hook has 5s budget)
+    const stdinRaw = await readStdin(3000)
     const data: StdinData = stdinRaw.trim() ? JSON.parse(stdinRaw) : {}
 
     // Extract session_id (support both formats)

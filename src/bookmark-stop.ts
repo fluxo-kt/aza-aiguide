@@ -6,6 +6,7 @@ import type { LogMetrics } from './lib/log'
 import { buildInjectionCommand, spawnDetached } from './lib/inject'
 import type { InjectionMethod } from './lib/inject'
 import { isContextLimitStop, isUserAbort } from './lib/guards'
+import { readStdin } from './lib/stdin'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -74,34 +75,12 @@ export function evaluateBookmark(
 }
 
 /**
- * Read stdin with timeout
- */
-function readStdin(timeoutMs = 5000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    const timeout = setTimeout(() => {
-      reject(new Error('stdin read timeout'))
-    }, timeoutMs)
-
-    process.stdin.on('data', (chunk) => chunks.push(chunk))
-    process.stdin.on('end', () => {
-      clearTimeout(timeout)
-      resolve(Buffer.concat(chunks).toString('utf8'))
-    })
-    process.stdin.on('error', (err) => {
-      clearTimeout(timeout)
-      reject(err)
-    })
-  })
-}
-
-/**
  * Main entry point
  */
 async function main(): Promise<void> {
   try {
     const config = loadConfig()
-    const input = await readStdin()
+    const input = await readStdin(5000)
     const data: Record<string, unknown> = JSON.parse(input)
 
     // Normalize field names (camelCase variants)

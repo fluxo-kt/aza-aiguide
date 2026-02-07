@@ -6,6 +6,7 @@ import type { InjectionMethod } from './lib/inject'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
+import { readStdin } from './lib/stdin'
 
 interface SessionConfig {
   sessionId: string
@@ -26,19 +27,6 @@ interface HookEvent {
   toolOutput?: string
   output?: string
   [key: string]: unknown
-}
-
-function readStdin(): Promise<string> {
-  return new Promise((resolve) => {
-    let data = ''
-    const timer = setTimeout(() => { resolve(data) }, 2500)
-    process.stdin.setEncoding('utf-8')
-    process.stdin.on('data', (chunk: string) => { data += chunk })
-    process.stdin.on('end', () => {
-      clearTimeout(timer)
-      resolve(data)
-    })
-  })
 }
 
 function getSessionConfig(sessionId: string, stateDir?: string): SessionConfig | null {
@@ -135,7 +123,7 @@ export function handleSubagentStop(sessionId: string, data: Record<string, unkno
 
 async function main(): Promise<void> {
   try {
-    const input = await readStdin()
+    const input = await readStdin(2500)
     const data = JSON.parse(input) as HookEvent
 
     const eventName = data.hook_event_name || data.hookEventName || ''

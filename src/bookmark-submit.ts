@@ -2,6 +2,7 @@
 
 import { loadConfig } from './lib/config'
 import { appendEvent } from './lib/log'
+import { readStdin } from './lib/stdin'
 
 interface StdinData {
   hook_event_name?: string
@@ -53,28 +54,9 @@ export function processBookmark(
   }
 }
 
-async function readStdin(timeout = 5000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    const timer = setTimeout(() => {
-      reject(new Error('Stdin read timeout'))
-    }, timeout)
-
-    process.stdin.on('data', (chunk) => chunks.push(chunk))
-    process.stdin.on('end', () => {
-      clearTimeout(timer)
-      resolve(Buffer.concat(chunks).toString('utf8'))
-    })
-    process.stdin.on('error', (err) => {
-      clearTimeout(timer)
-      reject(err)
-    })
-  })
-}
-
 async function main(): Promise<void> {
   try {
-    const input = await readStdin()
+    const input = await readStdin(5000)
     const data: StdinData = JSON.parse(input)
 
     const sessionId = data.session_id ?? data.sessionId ?? 'unknown'
