@@ -6,7 +6,6 @@ import {
   buildInjectionCommand,
   spawnDetached,
 } from '../src/lib/inject';
-import type { InjectionMethod } from '../src/lib/inject';
 
 describe('inject utilities', () => {
   // Store original env values
@@ -106,8 +105,7 @@ describe('inject utilities', () => {
       delete process.env.TMUX_PANE;
       delete process.env.STY;
 
-      const originalPlatform = process.platform;
-      // Mock platform check by testing on non-darwin if available
+      // Can only test on non-darwin platforms
       const result = detectInjectionMethod();
       if (process.platform !== 'darwin') {
         expect(result.method).toBe('disabled');
@@ -117,22 +115,22 @@ describe('inject utilities', () => {
   });
 
   describe('buildInjectionCommand', () => {
-    test('returns tmux command', () => {
+    test('returns tmux command with quoted target and marker', () => {
       const command = buildInjectionCommand('tmux', '%0', '📖');
       expect(command).not.toBeNull();
       expect(command).toContain('tmux send-keys');
-      expect(command).toContain('-t %0');
+      expect(command).toContain("-t '%0'");
       expect(command).toContain('-l');
-      expect(command).toContain('📖');
+      expect(command).toContain("'📖'");
       expect(command).toContain('Enter');
     });
 
-    test('returns screen command', () => {
+    test('returns screen command with quoted target and marker', () => {
       const command = buildInjectionCommand('screen', '12345.pts-0', '📖');
       expect(command).not.toBeNull();
-      expect(command).toContain('screen -S 12345.pts-0');
+      expect(command).toContain("screen -S '12345.pts-0'");
       expect(command).toContain('-X stuff');
-      expect(command).toContain('📖');
+      expect(command).toContain("'📖");
       expect(command).toContain('\\n');
     });
 
