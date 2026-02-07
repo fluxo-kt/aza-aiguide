@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { writeFileSync } from 'fs'
+import { join } from 'path'
+import { homedir } from 'os'
 import { loadConfig } from './lib/config'
 import type { TavConfig } from './lib/config'
 import { ensureStateDir, getLogPath, cleanOldSessions, sanitizeSessionId } from './lib/log'
@@ -69,7 +71,7 @@ async function main(): Promise<void> {
       startedAt: Date.now()
     }
 
-    const sessionConfigPath = `${process.env.HOME}/.claude/tav/state/${sanitizedId}.json`
+    const sessionConfigPath = join(homedir(), '.claude', 'tav', 'state', `${sanitizedId}.json`)
     writeFileSync(sessionConfigPath, JSON.stringify(sessionConfig, null, 2), 'utf-8')
 
     // Create empty activity log

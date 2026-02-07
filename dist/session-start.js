@@ -2,6 +2,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs_1 = require("fs");
+const path_1 = require("path");
+const os_1 = require("os");
 const config_1 = require("./lib/config");
 const log_1 = require("./lib/log");
 const inject_1 = require("./lib/inject");
@@ -45,7 +47,7 @@ async function main() {
             injectionTarget: injection.target,
             startedAt: Date.now()
         };
-        const sessionConfigPath = `${process.env.HOME}/.claude/tav/state/${sanitizedId}.json`;
+        const sessionConfigPath = (0, path_1.join)((0, os_1.homedir)(), '.claude', 'tav', 'state', `${sanitizedId}.json`);
         (0, fs_1.writeFileSync)(sessionConfigPath, JSON.stringify(sessionConfig, null, 2), 'utf-8');
         // Create empty activity log
         const logPath = (0, log_1.getLogPath)(sessionId);
