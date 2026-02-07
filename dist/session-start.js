@@ -61,8 +61,10 @@ async function main() {
         console.log(JSON.stringify({ continue: true }));
     }
 }
-main().catch((error) => {
-    console.error('Fatal error:', error);
-    console.log(JSON.stringify({ continue: true }));
-    process.exit(0);
-});
+if (require.main === module) {
+    main().then(() => process.exit(0), (error) => {
+        console.error('Fatal error:', error);
+        console.log(JSON.stringify({ continue: true }));
+        process.exit(0);
+    });
+}
