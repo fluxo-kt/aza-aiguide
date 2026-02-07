@@ -77,11 +77,17 @@ export function handlePostToolUse(sessionId: string, data: Record<string, unknow
   appendEvent(sessionId, `T ${Date.now()} ${charCount}`, logDir)
 }
 
-export function handleSubagentStop(sessionId: string, data: Record<string, unknown>, logDir?: string, sessionStateDir?: string): boolean {
+export function handleSubagentStop(sessionId: string, data: Record<string, unknown>, logDir?: string, sessionStateDir?: string, configPath?: string): boolean {
   const charCount = measureSize(data.output ?? data.result ?? data.response ?? data.agent_output)
   appendEvent(sessionId, `A ${Date.now()} ${charCount}`, logDir)
 
-  const config = loadConfig()
+  const config = loadConfig(configPath)
+
+  // Guard: bookmarks disabled globally (mirrors evaluateBookmark Guard 1)
+  if (!config.bookmarks.enabled) {
+    return false
+  }
+
   const metrics = parseLog(sessionId, logDir)
   const thresholds = config.bookmarks.thresholds
 

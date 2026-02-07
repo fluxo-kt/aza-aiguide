@@ -309,6 +309,42 @@ describe('bookmark-activity', () => {
       expect(result).toBe(true)
     })
 
+    test('does not trigger when bookmarks.enabled is false', () => {
+      writeSessionConfig(TEST_SESSION_ID, stateDir, {
+        injectionMethod: 'tmux',
+        injectionTarget: '%1'
+      })
+
+      // Write a config with enabled=false
+      const configPath = join(logDir, 'disabled-config.json')
+      writeFileSync(configPath, JSON.stringify({
+        bookmarks: { enabled: false }
+      }))
+
+      // Pre-populate log with enough activity to exceed all thresholds
+      const logPath = getLogPath(TEST_SESSION_ID, logDir)
+      const now = Date.now()
+      let logContent = ''
+      for (let i = 0; i < 20; i++) {
+        logContent += `T ${now - 200000 + i * 100} 2000\n`
+      }
+      for (let i = 0; i < 5; i++) {
+        logContent += `A ${now - 100000 + i * 100} 1000\n`
+      }
+      writeFileSync(logPath, logContent)
+
+      // Should NOT trigger despite all thresholds being met
+      const data = { output: 'test' }
+      const result = handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir, configPath)
+
+      expect(result).toBe(false)
+
+      const log = readLog(TEST_SESSION_ID, logDir)
+      const lines = log.trim().split('\n')
+      const iLines = lines.filter(line => line.startsWith('I '))
+      expect(iLines.length).toBe(0)
+    })
+
     test('does not trigger when last line is bookmark', () => {
       writeSessionConfig(TEST_SESSION_ID, stateDir, {
         injectionMethod: 'tmux',
