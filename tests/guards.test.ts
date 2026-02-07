@@ -38,6 +38,10 @@ describe('isContextLimitStop', () => {
     expect(isContextLimitStop({ stop_reason: 'max_context' })).toBe(true);
   });
 
+  test('returns true for context_limit via reason field', () => {
+    expect(isContextLimitStop({ reason: 'context_limit' })).toBe(true);
+  });
+
   test('returns false for normal stop', () => {
     expect(isContextLimitStop({ stop_reason: 'end_turn' })).toBe(false);
   });
@@ -102,6 +106,10 @@ describe('isUserAbort', () => {
 
   test('returns true for ABORT (case insensitive)', () => {
     expect(isUserAbort({ stop_reason: 'ABORT' })).toBe(true);
+  });
+
+  test('returns true for abort via reason field', () => {
+    expect(isUserAbort({ reason: 'abort' })).toBe(true);
   });
 
   test('returns false for normal stop', () => {

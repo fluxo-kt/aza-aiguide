@@ -21,8 +21,8 @@ export function isContextLimitStop(data: Record<string, unknown>): boolean {
     'input_too_long',
   ];
 
-  // Check stop_reason (snake_case and camelCase)
-  const stopReason = (data.stop_reason ?? data.stopReason) as string | undefined;
+  // Check stop_reason / stopReason / reason (all known field name variants)
+  const stopReason = (data.stop_reason ?? data.stopReason ?? data.reason) as string | undefined;
   if (stopReason) {
     const normalized = String(stopReason).toLowerCase();
     if (contextLimitPatterns.some((pattern) => normalized.includes(pattern))) {
@@ -52,8 +52,8 @@ export function isUserAbort(data: Record<string, unknown>): boolean {
     return true;
   }
 
-  // Check stop_reason
-  const stopReason = (data.stop_reason ?? data.stopReason) as string | undefined;
+  // Check stop_reason / stopReason / reason (all known field name variants)
+  const stopReason = (data.stop_reason ?? data.stopReason ?? data.reason) as string | undefined;
   if (!stopReason) {
     return false;
   }
