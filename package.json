@@ -4,7 +4,7 @@
   "description": "Conversation bookmarks for Claude Code — navigable anchor points in long sessions",
   "private": true,
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
