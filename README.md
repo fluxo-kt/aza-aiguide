@@ -106,7 +106,7 @@ rm -rf ~/.claude/tav/state/
 
 ```bash
 bun install
-bun test        # 96 tests
+bun test        # 134 tests
 bun run build   # compile dist/ for node fallback
 ```
 
