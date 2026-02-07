@@ -125,9 +125,12 @@ async function main(): Promise<void> {
       process.exit(0)
     }
 
-    if (eventName === 'PostToolUse') {
+    // Dispatch by event name, with fallback heuristics if hook_event_name
+    // is missing: presence of tool_name implies PostToolUse, agent_id
+    // implies SubagentStop.
+    if (eventName === 'PostToolUse' || (!eventName && data.tool_name)) {
       handlePostToolUse(sessionId, data)
-    } else if (eventName === 'SubagentStop') {
+    } else if (eventName === 'SubagentStop' || (!eventName && data.agent_id)) {
       handleSubagentStop(sessionId, data)
     }
 

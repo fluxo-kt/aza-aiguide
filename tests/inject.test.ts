@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import {
   isValidPaneId,
   sanitizeForShell,
+  sanitizeForAppleScript,
   resolveTerminalProcessName,
   detectInjectionMethod,
   buildInjectionCommand,
@@ -135,6 +136,27 @@ describe('inject utilities', () => {
         expect(result.method).toBe('disabled');
         expect(result.target).toBe('');
       }
+    });
+  });
+
+  describe('sanitizeForAppleScript', () => {
+    test('escapes double quotes', () => {
+      expect(sanitizeForAppleScript('hello "world"')).toBe('hello \\"world\\"');
+    });
+
+    test('escapes backslashes', () => {
+      expect(sanitizeForAppleScript('path\\to\\file')).toBe('path\\\\to\\\\file');
+    });
+
+    test('escapes both together', () => {
+      expect(sanitizeForAppleScript('" & do shell script "evil" & "')).toBe(
+        '\\" & do shell script \\"evil\\" & \\"'
+      );
+    });
+
+    test('leaves safe strings unchanged', () => {
+      expect(sanitizeForAppleScript('·')).toBe('·');
+      expect(sanitizeForAppleScript('Warp')).toBe('Warp');
     });
   });
 

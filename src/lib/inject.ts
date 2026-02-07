@@ -24,6 +24,14 @@ export function sanitizeForShell(text: string): string {
 }
 
 /**
+ * Escapes characters for safe interpolation into AppleScript double-quoted strings.
+ * Escapes backslash and double-quote to prevent breakout.
+ */
+export function sanitizeForAppleScript(text: string): string {
+  return text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/**
  * Resolves the macOS process name for the current terminal emulator.
  * Used for targeted AppleScript keystroke injection.
  *
@@ -109,10 +117,14 @@ export function buildInjectionCommand(
       // macOS keystroke automation — split into separate keystroke + Enter for reliability.
       // When target is set (e.g. "Warp", "iTerm2"), use process-targeted injection
       // which is critical for terminals with custom input editors like Warp Terminal.
-      const tellTarget = sanitizedTarget
-        ? `tell application "System Events" to tell process "${sanitizedTarget}"`
+      // Both target and marker are sanitised for AppleScript double-quoted strings
+      // to prevent injection via crafted config or session state.
+      const asTarget = sanitizeForAppleScript(target);
+      const asMarker = sanitizeForAppleScript(marker);
+      const tellTarget = asTarget
+        ? `tell application "System Events" to tell process "${asTarget}"`
         : 'tell application "System Events"';
-      return `sleep 1.5 && osascript -e '${tellTarget} to keystroke "${sanitizedMarker}"' && sleep 0.2 && osascript -e '${tellTarget} to key code 36'`;
+      return `sleep 1.5 && osascript -e '${tellTarget} to keystroke "${asMarker}"' && sleep 0.2 && osascript -e '${tellTarget} to key code 36'`;
     }
 
     default:
