@@ -85,7 +85,6 @@ async function main() {
         const data = JSON.parse(input);
         // Normalize field names (camelCase variants)
         const sessionId = (data.session_id || data.sessionId);
-        const cwd = (data.cwd || process.cwd());
         if (!sessionId) {
             console.log(JSON.stringify({ continue: true }));
             return;

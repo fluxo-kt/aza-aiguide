@@ -106,7 +106,6 @@ async function main(): Promise<void> {
 
     // Normalize field names (camelCase variants)
     const sessionId = (data.session_id || data.sessionId) as string | undefined
-    const cwd = (data.cwd || process.cwd()) as string
 
     if (!sessionId) {
       console.log(JSON.stringify({ continue: true }))
