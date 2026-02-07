@@ -44,6 +44,10 @@ function detectInjectionMethod() {
 /**
  * Builds a shell command to inject a marker character into the terminal.
  * Returns null if the method is disabled.
+ *
+ * The returned command is intended for use with spawnDetached(), which passes
+ * it to spawn('sh', ['-c', command]). All interpolated values are single-quoted
+ * with sanitizeForShell() escaping for defense-in-depth.
  */
 function buildInjectionCommand(method, target, marker) {
     if (method === 'disabled') {
@@ -54,13 +58,15 @@ function buildInjectionCommand(method, target, marker) {
     switch (method) {
         case 'tmux':
             // Use -l flag for literal text, separate commands for marker and Enter
-            return `sh -c 'sleep 1.5 && tmux send-keys -t ${sanitizedTarget} -l '\''${sanitizedMarker}'\'' && tmux send-keys -t ${sanitizedTarget} Enter'`;
+            // All values single-quoted for defense-in-depth
+            return `sleep 1.5 && tmux send-keys -t '${sanitizedTarget}' -l '${sanitizedMarker}' && tmux send-keys -t '${sanitizedTarget}' Enter`;
         case 'screen':
-            // Use stuff command with \n for newline
-            return `sh -c 'sleep 1.5 && screen -S ${sanitizedTarget} -X stuff '\''${sanitizedMarker}\\n'\'''`;
+            // Use stuff command with \\n for newline (screen interprets \n as newline)
+            // All values single-quoted for defense-in-depth
+            return `sleep 1.5 && screen -S '${sanitizedTarget}' -X stuff '${sanitizedMarker}\\n'`;
         case 'osascript':
-            // macOS keystroke automation
-            return `sh -c 'sleep 1.5 && osascript -e '\''tell application "System Events" to keystroke "${sanitizedMarker}" & return'\'''`;
+            // macOS keystroke automation — marker placed in AppleScript double-quotes
+            return `sleep 1.5 && osascript -e 'tell application "System Events" to keystroke "${sanitizedMarker}" & return'`;
         default:
             return null;
     }
