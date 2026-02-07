@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
+import type { ThresholdConfig } from './config'
 
 const DEFAULT_STATE_DIR = join(homedir(), '.claude', 'tav', 'state')
 
@@ -126,6 +127,30 @@ export function parseLog(sessionId: string, stateDir: string = DEFAULT_STATE_DIR
     lastBookmarkAt,
     lastLineIsBookmark
   }
+}
+
+/**
+ * Single source of truth for threshold evaluation.
+ * Returns whether ANY threshold is met and which one triggered.
+ * Used by both Stop hook (evaluateBookmark) and SubagentStop hook (handleSubagentStop).
+ */
+export function meetsAnyThreshold(
+  metrics: LogMetrics,
+  thresholds: ThresholdConfig
+): { met: boolean; reason: string } {
+  if (metrics.estimatedTokens >= thresholds.minTokens) {
+    return { met: true, reason: `token threshold met (${metrics.estimatedTokens} >= ${thresholds.minTokens})` }
+  }
+  if (metrics.toolCalls >= thresholds.minToolCalls) {
+    return { met: true, reason: `tool call threshold met (${metrics.toolCalls} >= ${thresholds.minToolCalls})` }
+  }
+  if (metrics.elapsedSeconds >= thresholds.minSeconds) {
+    return { met: true, reason: `time threshold met (${metrics.elapsedSeconds} >= ${thresholds.minSeconds})` }
+  }
+  if (metrics.agentReturns >= thresholds.agentBurstThreshold) {
+    return { met: true, reason: `agent burst threshold met (${metrics.agentReturns} >= ${thresholds.agentBurstThreshold})` }
+  }
+  return { met: false, reason: 'no threshold met' }
 }
 
 export function cleanOldSessions(maxAgeDays: number = 7, stateDir: string = DEFAULT_STATE_DIR): void {

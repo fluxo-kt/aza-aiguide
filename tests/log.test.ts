@@ -6,8 +6,11 @@ import {
   sanitizeSessionId,
   appendEvent,
   parseLog,
-  cleanOldSessions
+  cleanOldSessions,
+  meetsAnyThreshold
 } from '../src/lib/log'
+import type { LogMetrics } from '../src/lib/log'
+import type { ThresholdConfig } from '../src/lib/config'
 
 describe('log', () => {
   let testDir: string
@@ -203,5 +206,78 @@ describe('log', () => {
     // Verify old files removed and recent file kept
     expect(parseLog('old-session', testDir).toolCalls).toBe(0)  // File missing, returns zero metrics
     expect(parseLog('recent-session', testDir).toolCalls).toBe(1)  // File exists
+  })
+
+  describe('meetsAnyThreshold', () => {
+    const baseMetrics: LogMetrics = {
+      toolCalls: 0,
+      agentReturns: 0,
+      estimatedTokens: 0,
+      elapsedSeconds: 0,
+      lastInjectionAt: 0,
+      lastBookmarkAt: 0,
+      lastLineIsBookmark: false
+    }
+
+    const thresholds: ThresholdConfig = {
+      minTokens: 6000,
+      minToolCalls: 15,
+      minSeconds: 120,
+      agentBurstThreshold: 3,
+      cooldownSeconds: 25
+    }
+
+    test('returns false when no threshold met', () => {
+      const result = meetsAnyThreshold(baseMetrics, thresholds)
+      expect(result.met).toBe(false)
+      expect(result.reason).toBe('no threshold met')
+    })
+
+    test('triggers on token threshold', () => {
+      const result = meetsAnyThreshold({ ...baseMetrics, estimatedTokens: 6000 }, thresholds)
+      expect(result.met).toBe(true)
+      expect(result.reason).toContain('token threshold')
+    })
+
+    test('triggers on tool call threshold', () => {
+      const result = meetsAnyThreshold({ ...baseMetrics, toolCalls: 15 }, thresholds)
+      expect(result.met).toBe(true)
+      expect(result.reason).toContain('tool call threshold')
+    })
+
+    test('triggers on time threshold', () => {
+      const result = meetsAnyThreshold({ ...baseMetrics, elapsedSeconds: 120 }, thresholds)
+      expect(result.met).toBe(true)
+      expect(result.reason).toContain('time threshold')
+    })
+
+    test('triggers on agent burst threshold', () => {
+      const result = meetsAnyThreshold({ ...baseMetrics, agentReturns: 3 }, thresholds)
+      expect(result.met).toBe(true)
+      expect(result.reason).toContain('agent burst threshold')
+    })
+
+    test('does not trigger when just below all thresholds', () => {
+      const result = meetsAnyThreshold({
+        ...baseMetrics,
+        estimatedTokens: 5999,
+        toolCalls: 14,
+        elapsedSeconds: 119,
+        agentReturns: 2
+      }, thresholds)
+      expect(result.met).toBe(false)
+    })
+
+    test('token threshold has priority (checked first)', () => {
+      const result = meetsAnyThreshold({
+        ...baseMetrics,
+        estimatedTokens: 6000,
+        toolCalls: 15,
+        elapsedSeconds: 120,
+        agentReturns: 3
+      }, thresholds)
+      expect(result.met).toBe(true)
+      expect(result.reason).toContain('token threshold')
+    })
   })
 })

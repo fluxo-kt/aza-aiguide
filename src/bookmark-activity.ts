@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { loadConfig } from './lib/config'
-import { appendEvent, parseLog, sanitizeSessionId } from './lib/log'
+import { appendEvent, parseLog, sanitizeSessionId, meetsAnyThreshold } from './lib/log'
 import { buildInjectionCommand, spawnDetached } from './lib/inject'
 import type { InjectionMethod } from './lib/inject'
 import { readFileSync, existsSync } from 'fs'
@@ -81,12 +81,9 @@ export function handleSubagentStop(sessionId: string, data: Record<string, unkno
 
   // Evaluate ALL thresholds — SubagentStop may be the only hook that fires
   // during long continuous turns where the Stop hook rarely triggers.
-  const agentTriggered = metrics.agentReturns >= thresholds.agentBurstThreshold
-  const tokenTriggered = metrics.estimatedTokens >= thresholds.minTokens
-  const toolTriggered = metrics.toolCalls >= thresholds.minToolCalls
-  const timeTriggered = metrics.elapsedSeconds >= thresholds.minSeconds
+  const { met } = meetsAnyThreshold(metrics, thresholds)
 
-  if (agentTriggered || tokenTriggered || toolTriggered || timeTriggered) {
+  if (met) {
     const cooldownMs = thresholds.cooldownSeconds * 1000
     const timeSinceLastAction = Date.now() - Math.max(metrics.lastInjectionAt, metrics.lastBookmarkAt)
 

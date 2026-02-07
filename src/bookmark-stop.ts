@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { loadConfig } from './lib/config'
 import type { TavConfig } from './lib/config'
-import { parseLog, appendEvent, sanitizeSessionId } from './lib/log'
+import { parseLog, appendEvent, sanitizeSessionId, meetsAnyThreshold } from './lib/log'
 import type { LogMetrics } from './lib/log'
 import { buildInjectionCommand, spawnDetached } from './lib/inject'
 import type { InjectionMethod } from './lib/inject'
@@ -53,25 +53,8 @@ export function evaluateBookmark(
   }
 
   // Threshold evaluation (ANY threshold met triggers bookmark)
-  const thresholds = config.bookmarks.thresholds
-
-  if (metrics.estimatedTokens >= thresholds.minTokens) {
-    return { shouldInject: true, reason: `token threshold met (${metrics.estimatedTokens} >= ${thresholds.minTokens})` }
-  }
-
-  if (metrics.toolCalls >= thresholds.minToolCalls) {
-    return { shouldInject: true, reason: `tool call threshold met (${metrics.toolCalls} >= ${thresholds.minToolCalls})` }
-  }
-
-  if (metrics.elapsedSeconds >= thresholds.minSeconds) {
-    return { shouldInject: true, reason: `time threshold met (${metrics.elapsedSeconds} >= ${thresholds.minSeconds})` }
-  }
-
-  if (metrics.agentReturns >= thresholds.agentBurstThreshold) {
-    return { shouldInject: true, reason: `agent burst threshold met (${metrics.agentReturns} >= ${thresholds.agentBurstThreshold})` }
-  }
-
-  return { shouldInject: false, reason: 'no threshold met' }
+  const { met, reason } = meetsAnyThreshold(metrics, config.bookmarks.thresholds)
+  return { shouldInject: met, reason }
 }
 
 /**

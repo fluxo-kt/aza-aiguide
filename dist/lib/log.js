@@ -5,6 +5,7 @@ exports.getLogPath = getLogPath;
 exports.ensureStateDir = ensureStateDir;
 exports.appendEvent = appendEvent;
 exports.parseLog = parseLog;
+exports.meetsAnyThreshold = meetsAnyThreshold;
 exports.cleanOldSessions = cleanOldSessions;
 const fs_1 = require("fs");
 const path_1 = require("path");
@@ -113,6 +114,26 @@ function parseLog(sessionId, stateDir = DEFAULT_STATE_DIR) {
         lastBookmarkAt,
         lastLineIsBookmark
     };
+}
+/**
+ * Single source of truth for threshold evaluation.
+ * Returns whether ANY threshold is met and which one triggered.
+ * Used by both Stop hook (evaluateBookmark) and SubagentStop hook (handleSubagentStop).
+ */
+function meetsAnyThreshold(metrics, thresholds) {
+    if (metrics.estimatedTokens >= thresholds.minTokens) {
+        return { met: true, reason: `token threshold met (${metrics.estimatedTokens} >= ${thresholds.minTokens})` };
+    }
+    if (metrics.toolCalls >= thresholds.minToolCalls) {
+        return { met: true, reason: `tool call threshold met (${metrics.toolCalls} >= ${thresholds.minToolCalls})` };
+    }
+    if (metrics.elapsedSeconds >= thresholds.minSeconds) {
+        return { met: true, reason: `time threshold met (${metrics.elapsedSeconds} >= ${thresholds.minSeconds})` };
+    }
+    if (metrics.agentReturns >= thresholds.agentBurstThreshold) {
+        return { met: true, reason: `agent burst threshold met (${metrics.agentReturns} >= ${thresholds.agentBurstThreshold})` };
+    }
+    return { met: false, reason: 'no threshold met' };
 }
 function cleanOldSessions(maxAgeDays = 7, stateDir = DEFAULT_STATE_DIR) {
     try {

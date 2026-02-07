@@ -57,11 +57,8 @@ function handleSubagentStop(sessionId, data, logDir, sessionStateDir, configPath
     const thresholds = config.bookmarks.thresholds;
     // Evaluate ALL thresholds — SubagentStop may be the only hook that fires
     // during long continuous turns where the Stop hook rarely triggers.
-    const agentTriggered = metrics.agentReturns >= thresholds.agentBurstThreshold;
-    const tokenTriggered = metrics.estimatedTokens >= thresholds.minTokens;
-    const toolTriggered = metrics.toolCalls >= thresholds.minToolCalls;
-    const timeTriggered = metrics.elapsedSeconds >= thresholds.minSeconds;
-    if (agentTriggered || tokenTriggered || toolTriggered || timeTriggered) {
+    const { met } = (0, log_1.meetsAnyThreshold)(metrics, thresholds);
+    if (met) {
         const cooldownMs = thresholds.cooldownSeconds * 1000;
         const timeSinceLastAction = Date.now() - Math.max(metrics.lastInjectionAt, metrics.lastBookmarkAt);
         if (timeSinceLastAction < cooldownMs) {
