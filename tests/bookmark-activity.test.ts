@@ -155,7 +155,7 @@ describe('bookmark-activity', () => {
         injectionTarget: '%1'
       })
 
-      // Add 2 A lines (threshold is 4)
+      // Add 2 A lines (threshold is 3)
       const data = { output: 'test' }
       handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
       const result = handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
@@ -177,12 +177,12 @@ describe('bookmark-activity', () => {
 
       const data = { output: 'test' }
 
-      // Add 3 A lines first
-      for (let i = 0; i < 3; i++) {
+      // Add 2 A lines first
+      for (let i = 0; i < 2; i++) {
         handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
       }
 
-      // 4th call should trigger injection (threshold is 4)
+      // 3rd call should trigger injection (threshold is 3)
       const result = handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
 
       expect(result).toBe(true)
@@ -256,6 +256,81 @@ describe('bookmark-activity', () => {
 
       const result = handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
 
+      expect(result).toBe(false)
+    })
+
+    test('triggers on token threshold via tool results', () => {
+      writeSessionConfig(TEST_SESSION_ID, stateDir, {
+        injectionMethod: 'tmux',
+        injectionTarget: '%1'
+      })
+
+      // Pre-populate log with T lines totalling >= 6000 tokens (24000 chars)
+      // This simulates a long turn with many tool results but few agent returns
+      const logPath = getLogPath(TEST_SESSION_ID, logDir)
+      const now = Date.now()
+      let logContent = ''
+      for (let i = 0; i < 10; i++) {
+        logContent += `T ${now - 5000 + i * 100} 2500\n`
+      }
+      writeFileSync(logPath, logContent)
+
+      // A single SubagentStop should now trigger because tokens >= 6000
+      const data = { output: 'x'.repeat(100) }
+      const result = handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
+
+      expect(result).toBe(true)
+
+      const log = readLog(TEST_SESSION_ID, logDir)
+      const lines = log.trim().split('\n')
+      const iLines = lines.filter(line => line.startsWith('I '))
+      expect(iLines.length).toBe(1)
+    })
+
+    test('triggers on tool call count threshold', () => {
+      writeSessionConfig(TEST_SESSION_ID, stateDir, {
+        injectionMethod: 'tmux',
+        injectionTarget: '%1'
+      })
+
+      // Pre-populate log with 15 T lines (>= minToolCalls default of 15)
+      const logPath = getLogPath(TEST_SESSION_ID, logDir)
+      const now = Date.now()
+      let logContent = ''
+      for (let i = 0; i < 15; i++) {
+        logContent += `T ${now - 5000 + i * 100} 100\n`
+      }
+      writeFileSync(logPath, logContent)
+
+      // A single SubagentStop should trigger because toolCalls >= 15
+      const data = { output: 'test' }
+      const result = handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
+
+      expect(result).toBe(true)
+    })
+
+    test('does not trigger when last line is bookmark', () => {
+      writeSessionConfig(TEST_SESSION_ID, stateDir, {
+        injectionMethod: 'tmux',
+        injectionTarget: '%1'
+      })
+
+      // Pre-populate log with enough activity + a B line at the end
+      const logPath = getLogPath(TEST_SESSION_ID, logDir)
+      const now = Date.now()
+      let logContent = ''
+      for (let i = 0; i < 20; i++) {
+        logContent += `T ${now - 60000 + i * 100} 2000\n`
+      }
+      logContent += `B ${now - 100}\n`
+      writeFileSync(logPath, logContent)
+
+      // SubagentStop should not trigger — last line is bookmark
+      const data = { output: 'test' }
+      const result = handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
+
+      // The A line gets appended AFTER the B, so counters reset.
+      // With only 1 A line and 0 T lines after B, no threshold is met.
       expect(result).toBe(false)
     })
   })

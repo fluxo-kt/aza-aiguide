@@ -83,12 +83,24 @@ export function handleSubagentStop(sessionId: string, data: Record<string, unkno
 
   const config = loadConfig()
   const metrics = parseLog(sessionId, logDir)
+  const thresholds = config.bookmarks.thresholds
 
-  if (metrics.agentReturns >= config.bookmarks.thresholds.agentBurstThreshold) {
-    const cooldownMs = config.bookmarks.thresholds.cooldownSeconds * 1000
+  // Evaluate ALL thresholds — SubagentStop may be the only hook that fires
+  // during long continuous turns where the Stop hook rarely triggers.
+  const agentTriggered = metrics.agentReturns >= thresholds.agentBurstThreshold
+  const tokenTriggered = metrics.estimatedTokens >= thresholds.minTokens
+  const toolTriggered = metrics.toolCalls >= thresholds.minToolCalls
+  const timeTriggered = metrics.elapsedSeconds >= thresholds.minSeconds
+
+  if (agentTriggered || tokenTriggered || toolTriggered || timeTriggered) {
+    const cooldownMs = thresholds.cooldownSeconds * 1000
     const timeSinceLastAction = Date.now() - Math.max(metrics.lastInjectionAt, metrics.lastBookmarkAt)
 
     if (timeSinceLastAction < cooldownMs) {
+      return false
+    }
+
+    if (metrics.lastLineIsBookmark) {
       return false
     }
 

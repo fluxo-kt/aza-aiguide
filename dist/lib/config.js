@@ -13,7 +13,7 @@ exports.DEFAULT_CONFIG = {
             minTokens: 6000,
             minToolCalls: 15,
             minSeconds: 120,
-            agentBurstThreshold: 4,
+            agentBurstThreshold: 3,
             cooldownSeconds: 25,
         },
     },
