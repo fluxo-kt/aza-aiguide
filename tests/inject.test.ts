@@ -4,6 +4,7 @@ import {
   sanitizeForShell,
   sanitizeForAppleScript,
   resolveTerminalProcessName,
+  checkAccessibilityPermission,
   detectInjectionMethod,
   buildInjectionCommand,
   spawnDetached,
@@ -193,6 +194,30 @@ describe('inject utilities', () => {
     test('returns empty string when TERM_PROGRAM is unset', () => {
       delete process.env.TERM_PROGRAM;
       expect(resolveTerminalProcessName()).toBe('');
+    });
+  });
+
+  describe('checkAccessibilityPermission', () => {
+    test('returns a boolean', () => {
+      // On macOS this will actually probe Accessibility;
+      // on other platforms it always returns true.
+      const result = checkAccessibilityPermission();
+      expect(typeof result).toBe('boolean');
+    });
+
+    test('returns true on non-darwin platforms', () => {
+      if (process.platform !== 'darwin') {
+        expect(checkAccessibilityPermission()).toBe(true);
+      }
+    });
+
+    test('returns boolean on darwin (actual system check)', () => {
+      if (process.platform === 'darwin') {
+        // We can't control Accessibility state in tests, but we can
+        // verify it doesn't throw and returns a boolean.
+        const result = checkAccessibilityPermission();
+        expect(typeof result).toBe('boolean');
+      }
     });
   });
 
