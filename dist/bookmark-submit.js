@@ -4,6 +4,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.processBookmark = processBookmark;
 const config_1 = require("./lib/config");
 const log_1 = require("./lib/log");
+const stdin_1 = require("./lib/stdin");
 function processBookmark(userPrompt, marker) {
     const trimmedPrompt = userPrompt.trim();
     // Not the marker — pass through
@@ -29,26 +30,9 @@ function processBookmark(userPrompt, marker) {
         }
     };
 }
-async function readStdin(timeout = 5000) {
-    return new Promise((resolve, reject) => {
-        const chunks = [];
-        const timer = setTimeout(() => {
-            reject(new Error('Stdin read timeout'));
-        }, timeout);
-        process.stdin.on('data', (chunk) => chunks.push(chunk));
-        process.stdin.on('end', () => {
-            clearTimeout(timer);
-            resolve(Buffer.concat(chunks).toString('utf8'));
-        });
-        process.stdin.on('error', (err) => {
-            clearTimeout(timer);
-            reject(err);
-        });
-    });
-}
 async function main() {
     try {
-        const input = await readStdin();
+        const input = await (0, stdin_1.readStdin)(5000);
         const data = JSON.parse(input);
         const sessionId = data.session_id ?? data.sessionId ?? 'unknown';
         const userPrompt = data.prompt ?? data.user_prompt ?? data.userPrompt ?? '';

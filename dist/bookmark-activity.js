@@ -9,18 +9,7 @@ const inject_1 = require("./lib/inject");
 const fs_1 = require("fs");
 const path_1 = require("path");
 const os_1 = require("os");
-function readStdin() {
-    return new Promise((resolve) => {
-        let data = '';
-        const timer = setTimeout(() => { resolve(data); }, 2500);
-        process.stdin.setEncoding('utf-8');
-        process.stdin.on('data', (chunk) => { data += chunk; });
-        process.stdin.on('end', () => {
-            clearTimeout(timer);
-            resolve(data);
-        });
-    });
-}
+const stdin_1 = require("./lib/stdin");
 function getSessionConfig(sessionId, stateDir) {
     const dir = stateDir || (0, path_1.join)((0, os_1.homedir)(), '.claude', 'tav', 'state');
     const sanitized = (0, log_1.sanitizeSessionId)(sessionId);
@@ -56,10 +45,14 @@ function handlePostToolUse(sessionId, data, logDir) {
     const charCount = measureSize(data.tool_response ?? data.toolResponse ?? data.toolOutput);
     (0, log_1.appendEvent)(sessionId, `T ${Date.now()} ${charCount}`, logDir);
 }
-function handleSubagentStop(sessionId, data, logDir, sessionStateDir) {
+function handleSubagentStop(sessionId, data, logDir, sessionStateDir, configPath) {
     const charCount = measureSize(data.output ?? data.result ?? data.response ?? data.agent_output);
     (0, log_1.appendEvent)(sessionId, `A ${Date.now()} ${charCount}`, logDir);
-    const config = (0, config_1.loadConfig)();
+    const config = (0, config_1.loadConfig)(configPath);
+    // Guard: bookmarks disabled globally (mirrors evaluateBookmark Guard 1)
+    if (!config.bookmarks.enabled) {
+        return false;
+    }
     const metrics = (0, log_1.parseLog)(sessionId, logDir);
     const thresholds = config.bookmarks.thresholds;
     // Evaluate ALL thresholds — SubagentStop may be the only hook that fires
@@ -96,7 +89,7 @@ function handleSubagentStop(sessionId, data, logDir, sessionStateDir) {
 }
 async function main() {
     try {
-        const input = await readStdin();
+        const input = await (0, stdin_1.readStdin)(2500);
         const data = JSON.parse(input);
         const eventName = data.hook_event_name || data.hookEventName || '';
         const sessionId = data.session_id || data.sessionId || '';

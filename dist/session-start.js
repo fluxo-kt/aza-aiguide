@@ -7,22 +7,11 @@ const os_1 = require("os");
 const config_1 = require("./lib/config");
 const log_1 = require("./lib/log");
 const inject_1 = require("./lib/inject");
-function readStdin() {
-    return new Promise((resolve) => {
-        let data = '';
-        const timer = setTimeout(() => { resolve(data); }, 3000);
-        process.stdin.setEncoding('utf-8');
-        process.stdin.on('data', (chunk) => { data += chunk; });
-        process.stdin.on('end', () => {
-            clearTimeout(timer);
-            resolve(data);
-        });
-    });
-}
+const stdin_1 = require("./lib/stdin");
 async function main() {
     try {
-        // Read stdin
-        const stdinRaw = await readStdin();
+        // Read stdin (3s timeout — SessionStart hook has 5s budget)
+        const stdinRaw = await (0, stdin_1.readStdin)(3000);
         const data = stdinRaw.trim() ? JSON.parse(stdinRaw) : {};
         // Extract session_id (support both formats)
         const sessionId = data.session_id || data.sessionId || 'unknown';

@@ -6,6 +6,7 @@ const config_1 = require("./lib/config");
 const log_1 = require("./lib/log");
 const inject_1 = require("./lib/inject");
 const guards_1 = require("./lib/guards");
+const stdin_1 = require("./lib/stdin");
 const fs_1 = require("fs");
 const path_1 = require("path");
 const os_1 = require("os");
@@ -56,32 +57,12 @@ function evaluateBookmark(data, config, metrics, injectionMethod) {
     return { shouldInject: false, reason: 'no threshold met' };
 }
 /**
- * Read stdin with timeout
- */
-function readStdin(timeoutMs = 5000) {
-    return new Promise((resolve, reject) => {
-        const chunks = [];
-        const timeout = setTimeout(() => {
-            reject(new Error('stdin read timeout'));
-        }, timeoutMs);
-        process.stdin.on('data', (chunk) => chunks.push(chunk));
-        process.stdin.on('end', () => {
-            clearTimeout(timeout);
-            resolve(Buffer.concat(chunks).toString('utf8'));
-        });
-        process.stdin.on('error', (err) => {
-            clearTimeout(timeout);
-            reject(err);
-        });
-    });
-}
-/**
  * Main entry point
  */
 async function main() {
     try {
         const config = (0, config_1.loadConfig)();
-        const input = await readStdin();
+        const input = await (0, stdin_1.readStdin)(5000);
         const data = JSON.parse(input);
         // Normalize field names (camelCase variants)
         const sessionId = (data.session_id || data.sessionId);
