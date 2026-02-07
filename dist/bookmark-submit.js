@@ -51,7 +51,7 @@ async function main() {
         const input = await readStdin();
         const data = JSON.parse(input);
         const sessionId = data.session_id ?? data.sessionId ?? 'unknown';
-        const userPrompt = data.user_prompt ?? data.userPrompt ?? '';
+        const userPrompt = data.prompt ?? data.user_prompt ?? data.userPrompt ?? '';
         const config = (0, config_1.loadConfig)();
         const marker = config.bookmarks?.marker ?? '\u00B7';
         const { isBookmark, output } = processBookmark(userPrompt, marker);

@@ -8,6 +8,7 @@ interface StdinData {
   hookEventName?: string
   session_id?: string
   sessionId?: string
+  prompt?: string
   user_prompt?: string
   userPrompt?: string
 }
@@ -77,7 +78,7 @@ async function main(): Promise<void> {
     const data: StdinData = JSON.parse(input)
 
     const sessionId = data.session_id ?? data.sessionId ?? 'unknown'
-    const userPrompt = data.user_prompt ?? data.userPrompt ?? ''
+    const userPrompt = data.prompt ?? data.user_prompt ?? data.userPrompt ?? ''
 
     const config = loadConfig()
     const marker = config.bookmarks?.marker ?? '\u00B7'
