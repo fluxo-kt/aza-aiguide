@@ -78,6 +78,7 @@ export function parseLog(sessionId: string, stateDir: string = DEFAULT_STATE_DIR
     const parts = line.split(' ')
     const type = parts[0]
     const timestamp = parseInt(parts[1], 10)
+    if (isNaN(timestamp)) continue
 
     if (type === 'I') {
       lastInjectionAt = Math.max(lastInjectionAt, timestamp)
@@ -91,7 +92,9 @@ export function parseLog(sessionId: string, stateDir: string = DEFAULT_STATE_DIR
     const parts = line.split(' ')
     const type = parts[0]
     const timestamp = parseInt(parts[1], 10)
-    const charCount = parts[2] ? parseInt(parts[2], 10) : 0
+    if (isNaN(timestamp)) continue
+    const rawCharCount = parts[2] ? parseInt(parts[2], 10) : 0
+    const charCount = isNaN(rawCharCount) ? 0 : rawCharCount
 
     if (type === 'T') {
       toolCalls++

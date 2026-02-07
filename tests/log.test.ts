@@ -141,6 +141,35 @@ describe('log', () => {
     expect(metrics.lastLineIsBookmark).toBe(true)
   })
 
+  test('parseLog skips malformed lines without NaN propagation', () => {
+    const sessionId = 'malformed-test'
+
+    // Write a mix of valid and malformed lines
+    appendEvent(sessionId, 'T 1000 100', testDir)       // valid
+    appendEvent(sessionId, 'T abc 200', testDir)         // malformed timestamp
+    appendEvent(sessionId, 'T', testDir)                 // missing timestamp entirely
+    appendEvent(sessionId, 'A 2000 xyz', testDir)        // malformed charCount
+    appendEvent(sessionId, 'I 3000', testDir)            // valid injection
+    appendEvent(sessionId, 'garbage line here', testDir)  // completely malformed
+
+    const metrics = parseLog(sessionId, testDir)
+    // Only valid T line counted (malformed ones skipped)
+    expect(metrics.toolCalls).toBe(1)
+    // A line with malformed charCount still counted (timestamp is valid)
+    expect(metrics.agentReturns).toBe(1)
+    // charCount: 100 (valid T) + 0 (A with NaN charCount treated as 0) = 100 / 4 = 25
+    expect(metrics.estimatedTokens).toBe(25)
+    // lastInjectionAt from the valid I line
+    expect(metrics.lastInjectionAt).toBe(3000)
+    // No NaN in any field
+    expect(Number.isFinite(metrics.toolCalls)).toBe(true)
+    expect(Number.isFinite(metrics.agentReturns)).toBe(true)
+    expect(Number.isFinite(metrics.estimatedTokens)).toBe(true)
+    expect(Number.isFinite(metrics.elapsedSeconds)).toBe(true)
+    expect(Number.isFinite(metrics.lastInjectionAt)).toBe(true)
+    expect(Number.isFinite(metrics.lastBookmarkAt)).toBe(true)
+  })
+
   test('cleanOldSessions removes old files', () => {
     const now = Date.now()
     const oldTime = now - (10 * 24 * 60 * 60 * 1000)  // 10 days ago
