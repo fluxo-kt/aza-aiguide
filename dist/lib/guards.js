@@ -23,8 +23,8 @@ function isContextLimitStop(data) {
         'conversation_too_long',
         'input_too_long',
     ];
-    // Check stop_reason (snake_case and camelCase)
-    const stopReason = (data.stop_reason ?? data.stopReason);
+    // Check stop_reason / stopReason / reason (all known field name variants)
+    const stopReason = (data.stop_reason ?? data.stopReason ?? data.reason);
     if (stopReason) {
         const normalized = String(stopReason).toLowerCase();
         if (contextLimitPatterns.some((pattern) => normalized.includes(pattern))) {
@@ -50,8 +50,8 @@ function isUserAbort(data) {
     if (data.user_requested || data.userRequested) {
         return true;
     }
-    // Check stop_reason
-    const stopReason = (data.stop_reason ?? data.stopReason);
+    // Check stop_reason / stopReason / reason (all known field name variants)
+    const stopReason = (data.stop_reason ?? data.stopReason ?? data.reason);
     if (!stopReason) {
         return false;
     }
