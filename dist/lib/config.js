@@ -47,10 +47,10 @@ function deepMerge(target, source) {
  */
 function validNumber(value, fallback) {
     if (typeof value === 'number')
-        return isNaN(value) || value < 0 ? fallback : value;
+        return !Number.isFinite(value) || value < 0 ? fallback : value;
     if (typeof value === 'string') {
         const n = Number(value);
-        return isNaN(n) || n < 0 ? fallback : n;
+        return !Number.isFinite(n) || n < 0 ? fallback : n;
     }
     return fallback;
 }
