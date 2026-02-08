@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test'
-import { shouldInjectBookmark } from '../src/lib/evaluate'
+import { shouldInjectBookmark, shouldCompact } from '../src/lib/evaluate'
 import { DEFAULT_CONFIG } from '../src/lib/config'
-import type { TavConfig } from '../src/lib/config'
+import type { TavConfig, ContextGuardConfig } from '../src/lib/config'
 import type { LogMetrics } from '../src/lib/log'
 
 function defaultMetrics(): LogMetrics {
@@ -14,7 +14,8 @@ function defaultMetrics(): LogMetrics {
     lastInjectionAt: 0,
     lastBookmarkAt: 0,
     lastCompactionAt: 0,
-    lastLineIsBookmark: false
+    lastLineIsBookmark: false,
+    recentAgentTimestamps: []
   }
 }
 
@@ -102,5 +103,127 @@ describe('shouldInjectBookmark', () => {
     const result = shouldInjectBookmark({ config: DEFAULT_CONFIG, metrics, injectionMethod: 'tmux' })
     expect(result.shouldInject).toBe(false)
     expect(result.reason).toContain('cooldown')
+  })
+})
+
+describe('shouldCompact', () => {
+  const defaultCG: ContextGuardConfig = DEFAULT_CONFIG.contextGuard
+
+  test('returns false when context guard disabled', () => {
+    const config: ContextGuardConfig = { ...defaultCG, enabled: false }
+    const result = shouldCompact({
+      pressure: 0.90,
+      config,
+      metrics: defaultMetrics(),
+      injectionMethod: 'tmux'
+    })
+    expect(result.shouldCompact).toBe(false)
+    expect(result.reason).toContain('disabled')
+  })
+
+  test('returns false when injection method is disabled', () => {
+    const result = shouldCompact({
+      pressure: 0.90,
+      config: defaultCG,
+      metrics: defaultMetrics(),
+      injectionMethod: 'disabled'
+    })
+    expect(result.shouldCompact).toBe(false)
+    expect(result.reason).toContain('disabled')
+  })
+
+  test('returns false when pressure below compactPercent', () => {
+    const result = shouldCompact({
+      pressure: 0.50,
+      config: defaultCG,
+      metrics: defaultMetrics(),
+      injectionMethod: 'tmux'
+    })
+    expect(result.shouldCompact).toBe(false)
+    expect(result.reason).toContain('below')
+  })
+
+  test('returns true when pressure at compactPercent', () => {
+    const result = shouldCompact({
+      pressure: 0.76,
+      config: defaultCG,
+      metrics: defaultMetrics(),
+      injectionMethod: 'tmux'
+    })
+    expect(result.shouldCompact).toBe(true)
+    expect(result.reason).toContain('76%')
+  })
+
+  test('returns true when pressure above compactPercent', () => {
+    const result = shouldCompact({
+      pressure: 0.90,
+      config: defaultCG,
+      metrics: defaultMetrics(),
+      injectionMethod: 'tmux'
+    })
+    expect(result.shouldCompact).toBe(true)
+  })
+
+  test('returns false within compaction cooldown', () => {
+    const metrics = {
+      ...defaultMetrics(),
+      lastCompactionAt: Date.now() - 30000 // 30s ago, cooldown is 120s
+    }
+    const result = shouldCompact({
+      pressure: 0.90,
+      config: defaultCG,
+      metrics,
+      injectionMethod: 'tmux'
+    })
+    expect(result.shouldCompact).toBe(false)
+    expect(result.reason).toContain('cooldown')
+  })
+
+  test('returns true after cooldown expires', () => {
+    const metrics = {
+      ...defaultMetrics(),
+      lastCompactionAt: Date.now() - 130000 // 130s ago, cooldown is 120s
+    }
+    const result = shouldCompact({
+      pressure: 0.80,
+      config: defaultCG,
+      metrics,
+      injectionMethod: 'tmux'
+    })
+    expect(result.shouldCompact).toBe(true)
+  })
+
+  test('guard ordering: disabled checked before pressure', () => {
+    const config: ContextGuardConfig = { ...defaultCG, enabled: false }
+    const result = shouldCompact({
+      pressure: 0.99,
+      config,
+      metrics: defaultMetrics(),
+      injectionMethod: 'tmux'
+    })
+    expect(result.shouldCompact).toBe(false)
+    expect(result.reason).toContain('guard disabled')
+  })
+
+  test('guard ordering: injection method checked before pressure', () => {
+    const result = shouldCompact({
+      pressure: 0.99,
+      config: defaultCG,
+      metrics: defaultMetrics(),
+      injectionMethod: 'disabled'
+    })
+    expect(result.shouldCompact).toBe(false)
+    expect(result.reason).toContain('injection method')
+  })
+
+  test('works with custom compactPercent', () => {
+    const config: ContextGuardConfig = { ...defaultCG, compactPercent: 0.50 }
+    const result = shouldCompact({
+      pressure: 0.55,
+      config,
+      metrics: defaultMetrics(),
+      injectionMethod: 'tmux'
+    })
+    expect(result.shouldCompact).toBe(true)
   })
 })

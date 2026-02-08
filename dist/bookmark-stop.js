@@ -9,6 +9,7 @@ const guards_1 = require("./lib/guards");
 const stdin_1 = require("./lib/stdin");
 const session_1 = require("./lib/session");
 const evaluate_1 = require("./lib/evaluate");
+const context_pressure_1 = require("./lib/context-pressure");
 /**
  * Evaluates whether to inject a bookmark after Claude's turn ends.
  * Stop-specific guards (contextLimitStop, userAbort) are checked here;
@@ -48,6 +49,7 @@ async function main() {
         }
         const injectionMethod = (sessionConfig.injectionMethod || 'disabled');
         const injectionTarget = sessionConfig.injectionTarget || '';
+        const jsonlPath = sessionConfig.jsonlPath ?? null;
         // Parse log metrics
         const metrics = (0, log_1.parseLog)(sessionId);
         // Evaluate whether to inject bookmark
@@ -62,16 +64,16 @@ async function main() {
             }
         }
         // Context guard: proactive compaction injection (independent of bookmark)
-        if (config.contextGuard.enabled && injectionMethod !== 'disabled') {
-            const cg = config.contextGuard;
-            if (metrics.cumulativeEstimatedTokens >= cg.compactThreshold) {
-                const compactCooldownMs = cg.compactCooldownSeconds * 1000;
-                const timeSinceCompaction = Date.now() - metrics.lastCompactionAt;
-                if (timeSinceCompaction >= compactCooldownMs) {
-                    const injection = { method: injectionMethod, target: injectionTarget };
-                    (0, inject_1.requestCompaction)(sessionId, injection);
-                }
-            }
+        const pressure = (0, context_pressure_1.getContextPressure)(jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard);
+        const compactEval = (0, evaluate_1.shouldCompact)({
+            pressure,
+            config: config.contextGuard,
+            metrics,
+            injectionMethod
+        });
+        if (compactEval.shouldCompact) {
+            const injection = { method: injectionMethod, target: injectionTarget };
+            (0, inject_1.requestCompaction)(sessionId, injection);
         }
         // Always allow continuation
         console.log(JSON.stringify({ continue: true }));

@@ -5,25 +5,30 @@ exports.evaluateContextPressure = evaluateContextPressure;
 const config_1 = require("./lib/config");
 const log_1 = require("./lib/log");
 const stdin_1 = require("./lib/stdin");
+const session_1 = require("./lib/session");
+const context_pressure_1 = require("./lib/context-pressure");
 /**
  * Evaluates whether a Task tool call should be denied due to context pressure.
  * Pure function for testability — no I/O, no side effects.
+ * Receives pre-computed pressure ratio (0–1) rather than computing it internally.
  */
-function evaluateContextPressure(config, metrics, toolName) {
-    // Only intercept Task tool calls (subagent spawns)
+function evaluateContextPressure(config, pressure, toolName) {
+    // Intercept all agent spawns — Task is CC's universal agent tool
+    // (Explorer, Plan, general-purpose are all subagent_type params to Task)
     if (toolName !== 'Task') {
         return { continue: true };
     }
-    // Check if context guard is enabled
     if (!config.contextGuard.enabled) {
         return { continue: true };
     }
-    // Check cumulative tokens against deny threshold
-    if (metrics.cumulativeEstimatedTokens >= config.contextGuard.denyThreshold) {
+    // Compare pressure ratio against deny percentage
+    if (pressure >= config.contextGuard.denyPercent) {
+        const pressurePct = (pressure * 100).toFixed(0);
+        const thresholdPct = (config.contextGuard.denyPercent * 100).toFixed(0);
         return {
             continue: true,
             permissionDecision: 'deny',
-            reason: `Context pressure critical: ${metrics.cumulativeEstimatedTokens} estimated tokens (threshold: ${config.contextGuard.denyThreshold}). Run /compact before spawning new agents.`,
+            reason: `Context pressure critical: ${pressurePct}% (threshold: ${thresholdPct}%). Run /compact before spawning new agents.`,
             hookSpecificOutput: {
                 hookEventName: 'PreToolUse',
                 additionalContext: '<system-reminder>Context pressure is critically high. Do NOT spawn new subagents. ' +
@@ -46,7 +51,11 @@ async function main() {
         }
         const config = (0, config_1.loadConfig)();
         const metrics = (0, log_1.parseLog)(sessionId);
-        const result = evaluateContextPressure(config, metrics, toolName);
+        // Read cached JSONL path from session config for real token pressure
+        const sessionConfig = (0, session_1.readSessionConfig)(sessionId);
+        const jsonlPath = sessionConfig?.jsonlPath ?? null;
+        const pressure = (0, context_pressure_1.getContextPressure)(jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard);
+        const result = evaluateContextPressure(config, pressure, toolName);
         console.log(JSON.stringify(result));
     }
     catch {

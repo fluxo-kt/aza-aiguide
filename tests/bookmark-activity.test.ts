@@ -345,18 +345,19 @@ describe('bookmark-activity', () => {
       expect(iLines.length).toBe(0)
     })
 
-    test('triggers compaction when cumulative tokens exceed compactThreshold', () => {
+    test('triggers compaction when pressure exceeds compactPercent', () => {
       writeSessionConfig(TEST_SESSION_ID, stateDir, {
         injectionMethod: 'tmux',
         injectionTarget: '%1'
       })
 
-      // Pre-populate log with enough chars to exceed compactThreshold (30000 tokens = 120000 chars)
+      // Need cumulative tokens >= 76% of 200000 = 152000 tokens = 608000 chars
+      // Use 250 T lines × 2500 chars = 625000 chars = 156250 tokens (~78%)
       const logPath = getLogPath(TEST_SESSION_ID, logDir)
       const now = Date.now()
       let logContent = ''
-      for (let i = 0; i < 50; i++) {
-        logContent += `T ${now - 5000 + i * 100} 2500\n`  // 50 * 2500 = 125000 chars = 31250 tokens
+      for (let i = 0; i < 250; i++) {
+        logContent += `T ${now - 5000 + i * 20} 2500\n`
       }
       writeFileSync(logPath, logContent)
 
@@ -377,11 +378,12 @@ describe('bookmark-activity', () => {
       })
 
       // Pre-populate with enough chars + a recent C line (within cooldown)
+      // After C marker, need >= 76% of 200000 = 152000 tokens = 608000 chars
       const logPath = getLogPath(TEST_SESSION_ID, logDir)
       const now = Date.now()
       let logContent = `C ${now - 5000}\n`  // Compaction 5s ago (cooldown is 120s)
-      for (let i = 0; i < 50; i++) {
-        logContent += `T ${now - 4000 + i * 50} 2500\n`
+      for (let i = 0; i < 250; i++) {
+        logContent += `T ${now - 4000 + i * 15} 2500\n`  // 625000 chars after C
       }
       writeFileSync(logPath, logContent)
 
@@ -408,12 +410,12 @@ describe('bookmark-activity', () => {
         contextGuard: { enabled: false }
       }))
 
-      // Pre-populate with enough chars
+      // Pre-populate with enough chars to exceed compactPercent if guard were enabled
       const logPath = getLogPath(TEST_SESSION_ID, logDir)
       const now = Date.now()
       let logContent = ''
-      for (let i = 0; i < 50; i++) {
-        logContent += `T ${now - 5000 + i * 100} 2500\n`
+      for (let i = 0; i < 250; i++) {
+        logContent += `T ${now - 5000 + i * 20} 2500\n`
       }
       writeFileSync(logPath, logContent)
 

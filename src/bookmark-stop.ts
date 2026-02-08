@@ -8,7 +8,8 @@ import type { InjectionMethod, InjectionConfig } from './lib/inject'
 import { isContextLimitStop, isUserAbort } from './lib/guards'
 import { readStdin } from './lib/stdin'
 import { readSessionConfig } from './lib/session'
-import { shouldInjectBookmark } from './lib/evaluate'
+import { shouldInjectBookmark, shouldCompact } from './lib/evaluate'
+import { getContextPressure } from './lib/context-pressure'
 
 /**
  * Evaluates whether to inject a bookmark after Claude's turn ends.
@@ -62,6 +63,7 @@ async function main(): Promise<void> {
 
     const injectionMethod = (sessionConfig.injectionMethod || 'disabled') as InjectionMethod
     const injectionTarget = sessionConfig.injectionTarget || ''
+    const jsonlPath = sessionConfig.jsonlPath ?? null
 
     // Parse log metrics
     const metrics = parseLog(sessionId)
@@ -86,16 +88,18 @@ async function main(): Promise<void> {
     }
 
     // Context guard: proactive compaction injection (independent of bookmark)
-    if (config.contextGuard.enabled && injectionMethod !== 'disabled') {
-      const cg = config.contextGuard
-      if (metrics.cumulativeEstimatedTokens >= cg.compactThreshold) {
-        const compactCooldownMs = cg.compactCooldownSeconds * 1000
-        const timeSinceCompaction = Date.now() - metrics.lastCompactionAt
-        if (timeSinceCompaction >= compactCooldownMs) {
-          const injection: InjectionConfig = { method: injectionMethod, target: injectionTarget }
-          requestCompaction(sessionId, injection)
-        }
-      }
+    const pressure = getContextPressure(jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard)
+
+    const compactEval = shouldCompact({
+      pressure,
+      config: config.contextGuard,
+      metrics,
+      injectionMethod
+    })
+
+    if (compactEval.shouldCompact) {
+      const injection: InjectionConfig = { method: injectionMethod, target: injectionTarget }
+      requestCompaction(sessionId, injection)
     }
 
     // Always allow continuation

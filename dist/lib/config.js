@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_CONFIG = void 0;
+exports.validNumber = validNumber;
 exports.loadConfig = loadConfig;
 const fs_1 = require("fs");
 const path_1 = require("path");
@@ -19,9 +20,11 @@ exports.DEFAULT_CONFIG = {
     },
     contextGuard: {
         enabled: true,
-        compactThreshold: 30000,
+        contextWindowTokens: 200000,
+        compactPercent: 0.76,
+        denyPercent: 0.85,
         compactCooldownSeconds: 120,
-        denyThreshold: 45000,
+        responseRatio: 0.25,
     },
 };
 /**
@@ -61,17 +64,57 @@ function validNumber(value, fallback) {
     return fallback;
 }
 /**
+ * Validates a percentage value (0–1 range). Returns fallback for out-of-range
+ * or invalid values. Accepts values like 0.76, 0.85.
+ */
+function validPercent(value, fallback) {
+    const n = validNumber(value, fallback);
+    return n > 1.0 ? fallback : n;
+}
+/**
  * Validates merged config, coercing threshold fields to numbers and
  * falling back to defaults for invalid values. This prevents silent
  * corruption where e.g. "minTokens": "banana" makes the threshold
  * unreachable (string comparison always false).
+ *
+ * Backward compatibility: if legacy fields (compactThreshold, denyThreshold)
+ * are present in the contextGuard section but new percentage fields are absent,
+ * converts them to percentages using responseRatio and contextWindowTokens.
  */
-function validateConfig(config) {
+function validateConfig(config, rawContextGuard) {
     const d = exports.DEFAULT_CONFIG.bookmarks;
     const t = config.bookmarks.thresholds;
     const dt = d.thresholds;
     const cg = config.contextGuard;
     const dcg = exports.DEFAULT_CONFIG.contextGuard;
+    // Resolve contextWindowTokens and responseRatio first (needed for legacy conversion)
+    const contextWindowTokens = validNumber(cg.contextWindowTokens, dcg.contextWindowTokens);
+    const responseRatio = validNumber(cg.responseRatio, dcg.responseRatio);
+    // Legacy backward compat: convert absolute thresholds to percentages
+    // Only applies when raw config has legacy fields but NOT the new percentage fields
+    let compactPercent = validPercent(cg.compactPercent, dcg.compactPercent);
+    let denyPercent = validPercent(cg.denyPercent, dcg.denyPercent);
+    if (rawContextGuard) {
+        const hasLegacyCompact = 'compactThreshold' in rawContextGuard && rawContextGuard.compactThreshold !== undefined;
+        const hasNewCompact = 'compactPercent' in rawContextGuard && rawContextGuard.compactPercent !== undefined;
+        const hasLegacyDeny = 'denyThreshold' in rawContextGuard && rawContextGuard.denyThreshold !== undefined;
+        const hasNewDeny = 'denyPercent' in rawContextGuard && rawContextGuard.denyPercent !== undefined;
+        const denominator = contextWindowTokens * responseRatio;
+        if (denominator > 0) {
+            if (hasLegacyCompact && !hasNewCompact) {
+                const legacyVal = validNumber(rawContextGuard.compactThreshold, 0);
+                if (legacyVal > 0) {
+                    compactPercent = Math.min(legacyVal / denominator, 1.0);
+                }
+            }
+            if (hasLegacyDeny && !hasNewDeny) {
+                const legacyVal = validNumber(rawContextGuard.denyThreshold, 0);
+                if (legacyVal > 0) {
+                    denyPercent = Math.min(legacyVal / denominator, 1.0);
+                }
+            }
+        }
+    }
     return {
         bookmarks: {
             enabled: typeof config.bookmarks.enabled === 'boolean'
@@ -90,9 +133,11 @@ function validateConfig(config) {
         },
         contextGuard: {
             enabled: typeof cg.enabled === 'boolean' ? cg.enabled : dcg.enabled,
-            compactThreshold: validNumber(cg.compactThreshold, dcg.compactThreshold),
+            contextWindowTokens,
+            compactPercent,
+            denyPercent,
             compactCooldownSeconds: validNumber(cg.compactCooldownSeconds, dcg.compactCooldownSeconds),
-            denyThreshold: validNumber(cg.denyThreshold, dcg.denyThreshold),
+            responseRatio,
         },
     };
 }
@@ -106,7 +151,9 @@ function loadConfig(configPath) {
     try {
         const content = (0, fs_1.readFileSync)(path, 'utf-8');
         const parsed = JSON.parse(content);
-        return validateConfig(deepMerge(exports.DEFAULT_CONFIG, parsed));
+        // Pass raw contextGuard section for legacy backward compat detection
+        const rawContextGuard = parsed.contextGuard;
+        return validateConfig(deepMerge(exports.DEFAULT_CONFIG, parsed), rawContextGuard);
     }
     catch (err) {
         if (err.code !== 'ENOENT') {

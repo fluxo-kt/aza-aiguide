@@ -2,6 +2,9 @@
 
 import { appendEvent, parseLog } from './lib/log'
 import { readStdin } from './lib/stdin'
+import { readSessionConfig } from './lib/session'
+import { loadConfig } from './lib/config'
+import { getContextPressure } from './lib/context-pressure'
 
 interface PreCompactInput {
   session_id?: string
@@ -21,11 +24,12 @@ interface HookOutput {
  * Processes a PreCompact event: resets the activity log window and injects
  * additionalContext so compaction preserves bookmark awareness.
  *
- * Pure function for testability — takes parsed metrics, returns hook output.
+ * Optionally includes real context pressure % when JSONL path is available.
  */
 export function processPreCompact(
   sessionId: string,
-  logDir?: string
+  logDir?: string,
+  sessionStateDir?: string
 ): HookOutput {
   // Read current metrics before reset
   const metrics = parseLog(sessionId, logDir)
@@ -35,12 +39,26 @@ export function processPreCompact(
   // in the context. The B marker ensures thresholds start from zero.
   appendEvent(sessionId, `B ${Date.now()}`, logDir)
 
+  // Optionally compute real context pressure for informational message
+  let pressureInfo = ''
+  try {
+    const sessionConfig = readSessionConfig(sessionId, sessionStateDir)
+    if (sessionConfig?.jsonlPath) {
+      const config = loadConfig()
+      const pressure = getContextPressure(sessionConfig.jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard)
+      pressureInfo = ` Context pressure at compaction: ${(pressure * 100).toFixed(0)}%.`
+    }
+  } catch {
+    // Non-critical — skip pressure info on error
+  }
+
   // Build summary for additionalContext — survives into the compacted context
   const summary =
     `<system-reminder>tav bookmark plugin: activity log reset after compaction. ` +
     `Pre-compaction metrics: ~${metrics.cumulativeEstimatedTokens} cumulative tokens, ` +
-    `${metrics.toolCalls} tool calls, ${metrics.agentReturns} agent returns. ` +
-    `Bookmark navigation points (·) are being managed automatically.</system-reminder>`
+    `${metrics.toolCalls} tool calls, ${metrics.agentReturns} agent returns.` +
+    pressureInfo +
+    ` Bookmark navigation points (·) are being managed automatically.</system-reminder>`
 
   return {
     continue: true,

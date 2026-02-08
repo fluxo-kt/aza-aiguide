@@ -162,39 +162,47 @@ describe('config loader', () => {
     expect(DEFAULT_CONFIG.bookmarks.thresholds.agentBurstThreshold).toBe(3)
     expect(DEFAULT_CONFIG.bookmarks.thresholds.cooldownSeconds).toBe(25)
     expect(DEFAULT_CONFIG.contextGuard.enabled).toBe(true)
-    expect(DEFAULT_CONFIG.contextGuard.compactThreshold).toBe(30000)
+    expect(DEFAULT_CONFIG.contextGuard.contextWindowTokens).toBe(200000)
+    expect(DEFAULT_CONFIG.contextGuard.compactPercent).toBe(0.76)
+    expect(DEFAULT_CONFIG.contextGuard.denyPercent).toBe(0.85)
     expect(DEFAULT_CONFIG.contextGuard.compactCooldownSeconds).toBe(120)
-    expect(DEFAULT_CONFIG.contextGuard.denyThreshold).toBe(45000)
+    expect(DEFAULT_CONFIG.contextGuard.responseRatio).toBe(0.25)
   })
 
   test('loadConfig deep merges partial contextGuard config', () => {
     writeFileSync(configPath, JSON.stringify({
-      contextGuard: { compactThreshold: 20000 }
+      contextGuard: { compactPercent: 0.60 }
     }), 'utf-8')
     const config = loadConfig(configPath)
 
     // User override applied
-    expect(config.contextGuard.compactThreshold).toBe(20000)
+    expect(config.contextGuard.compactPercent).toBe(0.60)
     // Missing fields fall back to defaults
     expect(config.contextGuard.enabled).toBe(true)
+    expect(config.contextGuard.contextWindowTokens).toBe(200000)
+    expect(config.contextGuard.denyPercent).toBe(0.85)
     expect(config.contextGuard.compactCooldownSeconds).toBe(120)
-    expect(config.contextGuard.denyThreshold).toBe(45000)
+    expect(config.contextGuard.responseRatio).toBe(0.25)
   })
 
   test('loadConfig validates contextGuard numeric fields', () => {
     writeFileSync(configPath, JSON.stringify({
       contextGuard: {
-        compactThreshold: 'banana',
+        contextWindowTokens: 'banana',
+        compactPercent: -0.5,
+        denyPercent: null,
         compactCooldownSeconds: -10,
-        denyThreshold: null,
+        responseRatio: 'NaN',
       }
     }), 'utf-8')
     const config = loadConfig(configPath)
 
     // All invalid values fall back to defaults
-    expect(config.contextGuard.compactThreshold).toBe(DEFAULT_CONFIG.contextGuard.compactThreshold)
+    expect(config.contextGuard.contextWindowTokens).toBe(DEFAULT_CONFIG.contextGuard.contextWindowTokens)
+    expect(config.contextGuard.compactPercent).toBe(DEFAULT_CONFIG.contextGuard.compactPercent)
+    expect(config.contextGuard.denyPercent).toBe(DEFAULT_CONFIG.contextGuard.denyPercent)
     expect(config.contextGuard.compactCooldownSeconds).toBe(DEFAULT_CONFIG.contextGuard.compactCooldownSeconds)
-    expect(config.contextGuard.denyThreshold).toBe(DEFAULT_CONFIG.contextGuard.denyThreshold)
+    expect(config.contextGuard.responseRatio).toBe(DEFAULT_CONFIG.contextGuard.responseRatio)
   })
 
   test('loadConfig validates contextGuard enabled as boolean', () => {
@@ -215,5 +223,84 @@ describe('config loader', () => {
 
     // contextGuard section missing entirely — all defaults
     expect(config.contextGuard).toEqual(DEFAULT_CONFIG.contextGuard)
+  })
+
+  test('loadConfig converts legacy compactThreshold to compactPercent', () => {
+    // Legacy: compactThreshold: 30000 tokens at responseRatio 0.25, contextWindowTokens 200000
+    // → denominator = 200000 * 0.25 = 50000
+    // → compactPercent = 30000 / 50000 = 0.60
+    writeFileSync(configPath, JSON.stringify({
+      contextGuard: { compactThreshold: 30000 }
+    }), 'utf-8')
+    const config = loadConfig(configPath)
+
+    expect(config.contextGuard.compactPercent).toBe(0.60)
+    // denyPercent untouched — uses default
+    expect(config.contextGuard.denyPercent).toBe(0.85)
+  })
+
+  test('loadConfig converts legacy denyThreshold to denyPercent', () => {
+    // Legacy: denyThreshold: 45000 → 45000 / 50000 = 0.90
+    writeFileSync(configPath, JSON.stringify({
+      contextGuard: { denyThreshold: 45000 }
+    }), 'utf-8')
+    const config = loadConfig(configPath)
+
+    expect(config.contextGuard.denyPercent).toBe(0.90)
+    // compactPercent untouched — uses default
+    expect(config.contextGuard.compactPercent).toBe(0.76)
+  })
+
+  test('loadConfig converts both legacy thresholds simultaneously', () => {
+    writeFileSync(configPath, JSON.stringify({
+      contextGuard: { compactThreshold: 25000, denyThreshold: 40000 }
+    }), 'utf-8')
+    const config = loadConfig(configPath)
+
+    // denominator = 200000 * 0.25 = 50000
+    expect(config.contextGuard.compactPercent).toBe(0.50)  // 25000 / 50000
+    expect(config.contextGuard.denyPercent).toBe(0.80)     // 40000 / 50000
+  })
+
+  test('loadConfig prefers new percentage fields over legacy thresholds', () => {
+    // When both old and new fields are present, new ones win
+    writeFileSync(configPath, JSON.stringify({
+      contextGuard: { compactThreshold: 30000, compactPercent: 0.70 }
+    }), 'utf-8')
+    const config = loadConfig(configPath)
+
+    // New field wins — legacy ignored when new field is present
+    expect(config.contextGuard.compactPercent).toBe(0.70)
+  })
+
+  test('loadConfig rejects compactPercent > 1.0', () => {
+    writeFileSync(configPath, JSON.stringify({
+      contextGuard: { compactPercent: 1.5 }
+    }), 'utf-8')
+    const config = loadConfig(configPath)
+
+    // Values > 1.0 fall back to default
+    expect(config.contextGuard.compactPercent).toBe(DEFAULT_CONFIG.contextGuard.compactPercent)
+  })
+
+  test('loadConfig accepts compactPercent at boundary values', () => {
+    // 0.0 is valid (effectively disables compaction)
+    writeFileSync(configPath, JSON.stringify({
+      contextGuard: { compactPercent: 0, denyPercent: 1.0 }
+    }), 'utf-8')
+    const config = loadConfig(configPath)
+
+    expect(config.contextGuard.compactPercent).toBe(0)
+    expect(config.contextGuard.denyPercent).toBe(1.0)
+  })
+
+  test('loadConfig legacy conversion clamps to 1.0', () => {
+    // Legacy threshold that would exceed 100%: 60000 / 50000 = 1.2 → clamped to 1.0
+    writeFileSync(configPath, JSON.stringify({
+      contextGuard: { compactThreshold: 60000 }
+    }), 'utf-8')
+    const config = loadConfig(configPath)
+
+    expect(config.contextGuard.compactPercent).toBe(1.0)
   })
 })

@@ -41,7 +41,8 @@ function parseLog(sessionId, stateDir = DEFAULT_STATE_DIR) {
             lastInjectionAt: 0,
             lastBookmarkAt: 0,
             lastCompactionAt: 0,
-            lastLineIsBookmark: false
+            lastLineIsBookmark: false,
+            recentAgentTimestamps: []
         };
     }
     const lines = content.split('\n').filter(l => l.trim());
@@ -60,15 +61,18 @@ function parseLog(sessionId, stateDir = DEFAULT_STATE_DIR) {
     let toolCalls = 0;
     let agentReturns = 0;
     let totalCharCount = 0;
-    let cumulativeCharCount = 0;
     let firstTimestamp = 0;
     let lastTimestamp = 0;
     let lastInjectionAt = 0;
     let lastBookmarkAt = 0;
     let lastCompactionAt = 0;
+    let lastCompactionIdx = -1;
+    const now = Date.now();
+    const recentAgentTimestamps = [];
     // Parse all lines for global metrics (lastInjectionAt, lastBookmarkAt,
-    // lastCompactionAt, cumulativeEstimatedTokens)
-    for (const line of lines) {
+    // lastCompactionAt, lastCompactionIdx, recentAgentTimestamps)
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
         const parts = line.split(' ');
         const type = parts[0];
         const timestamp = parseInt(parts[1], 10);
@@ -82,8 +86,24 @@ function parseLog(sessionId, stateDir = DEFAULT_STATE_DIR) {
         }
         else if (type === 'C') {
             lastCompactionAt = Math.max(lastCompactionAt, timestamp);
+            lastCompactionIdx = i;
         }
-        else if (type === 'T' || type === 'A') {
+        else if (type === 'A') {
+            // Collect recent A timestamps for burst detection (last 15 seconds)
+            if (now - timestamp < 15000) {
+                recentAgentTimestamps.push(timestamp);
+            }
+        }
+    }
+    // Cumulative tokens: count T/A chars only AFTER last compaction marker (C).
+    // Pre-compaction content is compressed and no longer in context, so including
+    // it would cause post-compaction thresholds to fire immediately (compaction loop).
+    let cumulativeCharCount = 0;
+    const cumulativeStartIdx = lastCompactionIdx === -1 ? 0 : lastCompactionIdx + 1;
+    for (let i = cumulativeStartIdx; i < lines.length; i++) {
+        const parts = lines[i].split(' ');
+        const type = parts[0];
+        if (type === 'T' || type === 'A') {
             const rawCharCount = parts[2] ? parseInt(parts[2], 10) : 0;
             cumulativeCharCount += isNaN(rawCharCount) ? 0 : rawCharCount;
         }
@@ -128,7 +148,8 @@ function parseLog(sessionId, stateDir = DEFAULT_STATE_DIR) {
         lastInjectionAt,
         lastBookmarkAt,
         lastCompactionAt,
-        lastLineIsBookmark
+        lastLineIsBookmark,
+        recentAgentTimestamps
     };
 }
 /**

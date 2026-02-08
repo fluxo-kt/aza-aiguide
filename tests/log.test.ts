@@ -163,7 +163,7 @@ describe('log', () => {
     expect(metrics.lastLineIsBookmark).toBe(true)
   })
 
-  test('parseLog tracks cumulativeEstimatedTokens across entire log', () => {
+  test('parseLog tracks cumulativeEstimatedTokens since last compaction', () => {
     const sessionId = 'cumulative-test'
 
     appendEvent(sessionId, 'T 1000 400', testDir)   // 100 tokens
@@ -175,8 +175,37 @@ describe('log', () => {
     const metrics = parseLog(sessionId, testDir)
     // estimatedTokens only counts after last bookmark: (200 + 600) / 4 = 200
     expect(metrics.estimatedTokens).toBe(200)
-    // cumulativeEstimatedTokens counts ALL T/A lines: (400 + 800 + 200 + 600) / 4 = 500
+    // cumulativeEstimatedTokens counts ALL T/A lines (no C marker): (400 + 800 + 200 + 600) / 4 = 500
     expect(metrics.cumulativeEstimatedTokens).toBe(500)
+  })
+
+  test('parseLog resets cumulativeEstimatedTokens after C marker', () => {
+    const sessionId = 'cumulative-reset-test'
+
+    appendEvent(sessionId, 'T 1000 4000', testDir)  // 1000 tokens
+    appendEvent(sessionId, 'A 2000 8000', testDir)  // 2000 tokens
+    appendEvent(sessionId, 'C 3000', testDir)        // compaction — resets cumulative
+    appendEvent(sessionId, 'T 4000 400', testDir)   // 100 tokens
+    appendEvent(sessionId, 'A 5000 800', testDir)   // 200 tokens
+
+    const metrics = parseLog(sessionId, testDir)
+    // Cumulative only counts AFTER last C marker: (400 + 800) / 4 = 300
+    // NOT (4000 + 8000 + 400 + 800) / 4 = 3300
+    expect(metrics.cumulativeEstimatedTokens).toBe(300)
+  })
+
+  test('parseLog cumulative reset handles multiple C markers', () => {
+    const sessionId = 'multi-compact-test'
+
+    appendEvent(sessionId, 'T 1000 10000', testDir)  // before first C
+    appendEvent(sessionId, 'C 2000', testDir)
+    appendEvent(sessionId, 'T 3000 4000', testDir)   // between C markers
+    appendEvent(sessionId, 'C 4000', testDir)          // second C — this is the reset point
+    appendEvent(sessionId, 'T 5000 800', testDir)    // after last C: 200 tokens
+
+    const metrics = parseLog(sessionId, testDir)
+    // Only chars after LAST C marker: 800 / 4 = 200
+    expect(metrics.cumulativeEstimatedTokens).toBe(200)
   })
 
   test('parseLog tracks lastCompactionAt from C events', () => {
@@ -195,6 +224,24 @@ describe('log', () => {
     const metrics = parseLog('nonexistent', testDir)
     expect(metrics.cumulativeEstimatedTokens).toBe(0)
     expect(metrics.lastCompactionAt).toBe(0)
+    expect(metrics.recentAgentTimestamps).toEqual([])
+  })
+
+  test('parseLog collects recentAgentTimestamps within 15s window', () => {
+    const sessionId = 'recent-agents-test'
+    const now = Date.now()
+
+    // Agent returns: 2 recent (within 15s), 1 old (>15s ago)
+    appendEvent(sessionId, `A ${now - 20000} 100`, testDir)  // 20s ago — too old
+    appendEvent(sessionId, `A ${now - 10000} 200`, testDir)  // 10s ago — recent
+    appendEvent(sessionId, `A ${now - 3000} 300`, testDir)   // 3s ago — recent
+    appendEvent(sessionId, `T ${now - 1000} 100`, testDir)   // T line — not collected
+
+    const metrics = parseLog(sessionId, testDir)
+    // Only the 2 recent A timestamps should be collected
+    expect(metrics.recentAgentTimestamps.length).toBe(2)
+    expect(metrics.recentAgentTimestamps).toContain(now - 10000)
+    expect(metrics.recentAgentTimestamps).toContain(now - 3000)
   })
 
   test('parseLog skips malformed lines without NaN propagation', () => {
@@ -262,7 +309,8 @@ describe('log', () => {
       lastInjectionAt: 0,
       lastBookmarkAt: 0,
       lastCompactionAt: 0,
-      lastLineIsBookmark: false
+      lastLineIsBookmark: false,
+      recentAgentTimestamps: []
     }
 
     const thresholds: ThresholdConfig = {

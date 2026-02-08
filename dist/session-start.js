@@ -7,6 +7,7 @@ const log_1 = require("./lib/log");
 const inject_1 = require("./lib/inject");
 const stdin_1 = require("./lib/stdin");
 const session_1 = require("./lib/session");
+const context_pressure_1 = require("./lib/context-pressure");
 async function main() {
     try {
         // Read stdin (3s timeout — SessionStart hook has 5s budget)
@@ -16,11 +17,12 @@ async function main() {
         const sessionId = data.session_id || data.sessionId || 'unknown';
         // Load config
         const config = (0, config_1.loadConfig)();
-        // If bookmarks disabled, exit early
-        if (config.bookmarks.enabled === false) {
+        // Only exit early when BOTH bookmarks AND contextGuard are disabled.
+        // contextGuard needs jsonlPath even when bookmarks are off.
+        if (config.bookmarks.enabled === false && config.contextGuard.enabled === false) {
             console.log(JSON.stringify({
                 continue: true,
-                note: 'Bookmarks disabled in config'
+                note: 'Both bookmarks and context guard disabled in config'
             }));
             return;
         }
@@ -42,12 +44,15 @@ async function main() {
         }
         // Ensure state directory exists
         (0, log_1.ensureStateDir)();
+        // Resolve JSONL path for context pressure reading (cached for all hooks)
+        const jsonlPath = (0, context_pressure_1.resolveJsonlPath)(sessionId);
         // Write session config via shared module
         const sessionConfig = {
             sessionId,
             injectionMethod: injection.method,
             injectionTarget: injection.target,
             startedAt: Date.now(),
+            ...(jsonlPath ? { jsonlPath } : {}),
             ...(disabledReason ? { disabledReason } : {})
         };
         (0, session_1.writeSessionConfig)(sessionId, sessionConfig);

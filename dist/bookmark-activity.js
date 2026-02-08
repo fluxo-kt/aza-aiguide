@@ -9,6 +9,7 @@ const inject_1 = require("./lib/inject");
 const stdin_1 = require("./lib/stdin");
 const session_1 = require("./lib/session");
 const evaluate_1 = require("./lib/evaluate");
+const context_pressure_1 = require("./lib/context-pressure");
 /**
  * Measures the size of a hook data field in characters.
  * Handles strings directly, serialises objects, and defaults to 0 for nullish values.
@@ -34,31 +35,33 @@ function handleSubagentStop(sessionId, data, logDir, sessionStateDir, configPath
     (0, log_1.appendEvent)(sessionId, `A ${Date.now()} ${charCount}`, logDir);
     const config = (0, config_1.loadConfig)(configPath);
     const metrics = (0, log_1.parseLog)(sessionId, logDir);
-    // Context guard: proactive compaction injection (independent of bookmark)
-    if (config.contextGuard.enabled) {
-        const cg = config.contextGuard;
-        if (metrics.cumulativeEstimatedTokens >= cg.compactThreshold) {
-            const compactCooldownMs = cg.compactCooldownSeconds * 1000;
-            const timeSinceCompaction = Date.now() - metrics.lastCompactionAt;
-            if (timeSinceCompaction >= compactCooldownMs) {
-                const sessionConfig = (0, session_1.readSessionConfig)(sessionId, sessionStateDir);
-                if (sessionConfig && sessionConfig.injectionMethod !== 'disabled') {
-                    const injection = {
-                        method: sessionConfig.injectionMethod,
-                        target: sessionConfig.injectionTarget
-                    };
-                    (0, inject_1.requestCompaction)(sessionId, injection, logDir);
-                }
-            }
-        }
-    }
-    // Read session config for injection details
+    // Read session config ONCE — shared by both compaction and bookmark evaluation
     const sessionConfig = (0, session_1.readSessionConfig)(sessionId, sessionStateDir);
     const injectionMethod = sessionConfig?.injectionMethod ?? 'disabled';
-    // Unified evaluation — same guard ordering as Stop hook
+    const injectionTarget = sessionConfig?.injectionTarget ?? '';
+    const jsonlPath = sessionConfig?.jsonlPath ?? null;
+    // Context guard: proactive compaction injection (independent of bookmark)
+    const pressure = (0, context_pressure_1.getContextPressure)(jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard);
+    // Burst detection: 5+ agent returns in 10 seconds AND pressure > 60%
+    // During agent cascades the Stop hook never fires — SubagentStop is the only checkpoint
+    const recentBurst = metrics.recentAgentTimestamps.filter(t => Date.now() - t < 10000).length >= 5;
+    const burstCompact = recentBurst && pressure > 0.60;
+    const compactEval = (0, evaluate_1.shouldCompact)({
+        pressure,
+        config: config.contextGuard,
+        metrics,
+        injectionMethod
+    });
+    if (compactEval.shouldCompact || burstCompact) {
+        const injection = {
+            method: injectionMethod,
+            target: injectionTarget
+        };
+        (0, inject_1.requestCompaction)(sessionId, injection, logDir);
+    }
+    // Unified bookmark evaluation — same guard ordering as Stop hook
     const evaluation = (0, evaluate_1.shouldInjectBookmark)({ config, metrics, injectionMethod });
     if (evaluation.shouldInject) {
-        const injectionTarget = sessionConfig?.injectionTarget ?? '';
         (0, log_1.appendEvent)(sessionId, `I ${Date.now()}`, logDir);
         const command = (0, inject_1.buildInjectionCommand)(injectionMethod, injectionTarget, config.bookmarks.marker);
         if (command) {

@@ -3,8 +3,9 @@
 import { loadConfig } from './lib/config'
 import type { TavConfig } from './lib/config'
 import { parseLog } from './lib/log'
-import type { LogMetrics } from './lib/log'
 import { readStdin } from './lib/stdin'
+import { readSessionConfig } from './lib/session'
+import { getContextPressure } from './lib/context-pressure'
 
 interface PreToolUseInput {
   session_id?: string
@@ -27,28 +28,31 @@ interface PreToolUseOutput {
 /**
  * Evaluates whether a Task tool call should be denied due to context pressure.
  * Pure function for testability — no I/O, no side effects.
+ * Receives pre-computed pressure ratio (0–1) rather than computing it internally.
  */
 export function evaluateContextPressure(
   config: TavConfig,
-  metrics: LogMetrics,
+  pressure: number,
   toolName: string
 ): PreToolUseOutput {
-  // Only intercept Task tool calls (subagent spawns)
+  // Intercept all agent spawns — Task is CC's universal agent tool
+  // (Explorer, Plan, general-purpose are all subagent_type params to Task)
   if (toolName !== 'Task') {
     return { continue: true }
   }
 
-  // Check if context guard is enabled
   if (!config.contextGuard.enabled) {
     return { continue: true }
   }
 
-  // Check cumulative tokens against deny threshold
-  if (metrics.cumulativeEstimatedTokens >= config.contextGuard.denyThreshold) {
+  // Compare pressure ratio against deny percentage
+  if (pressure >= config.contextGuard.denyPercent) {
+    const pressurePct = (pressure * 100).toFixed(0)
+    const thresholdPct = (config.contextGuard.denyPercent * 100).toFixed(0)
     return {
       continue: true,
       permissionDecision: 'deny',
-      reason: `Context pressure critical: ${metrics.cumulativeEstimatedTokens} estimated tokens (threshold: ${config.contextGuard.denyThreshold}). Run /compact before spawning new agents.`,
+      reason: `Context pressure critical: ${pressurePct}% (threshold: ${thresholdPct}%). Run /compact before spawning new agents.`,
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         additionalContext:
@@ -77,7 +81,13 @@ async function main(): Promise<void> {
 
     const config = loadConfig()
     const metrics = parseLog(sessionId)
-    const result = evaluateContextPressure(config, metrics, toolName)
+
+    // Read cached JSONL path from session config for real token pressure
+    const sessionConfig = readSessionConfig(sessionId)
+    const jsonlPath = sessionConfig?.jsonlPath ?? null
+
+    const pressure = getContextPressure(jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard)
+    const result = evaluateContextPressure(config, pressure, toolName)
 
     console.log(JSON.stringify(result))
   } catch {

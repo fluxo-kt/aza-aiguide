@@ -9,6 +9,7 @@ import type { InjectionConfig } from './lib/inject'
 import { readStdin } from './lib/stdin'
 import { writeSessionConfig } from './lib/session'
 import type { SessionConfig } from './lib/session'
+import { resolveJsonlPath } from './lib/context-pressure'
 
 interface StdinData {
   session_id?: string
@@ -28,11 +29,12 @@ async function main(): Promise<void> {
     // Load config
     const config: TavConfig = loadConfig()
 
-    // If bookmarks disabled, exit early
-    if (config.bookmarks.enabled === false) {
+    // Only exit early when BOTH bookmarks AND contextGuard are disabled.
+    // contextGuard needs jsonlPath even when bookmarks are off.
+    if (config.bookmarks.enabled === false && config.contextGuard.enabled === false) {
       console.log(JSON.stringify({
         continue: true,
-        note: 'Bookmarks disabled in config'
+        note: 'Both bookmarks and context guard disabled in config'
       }))
       return
     }
@@ -60,12 +62,16 @@ async function main(): Promise<void> {
     // Ensure state directory exists
     ensureStateDir()
 
+    // Resolve JSONL path for context pressure reading (cached for all hooks)
+    const jsonlPath = resolveJsonlPath(sessionId)
+
     // Write session config via shared module
     const sessionConfig: SessionConfig = {
       sessionId,
       injectionMethod: injection.method,
       injectionTarget: injection.target,
       startedAt: Date.now(),
+      ...(jsonlPath ? { jsonlPath } : {}),
       ...(disabledReason ? { disabledReason } : {})
     }
 

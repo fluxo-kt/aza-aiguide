@@ -3,7 +3,6 @@ import { evaluateBookmark } from '../src/bookmark-stop'
 import { DEFAULT_CONFIG } from '../src/lib/config'
 import type { TavConfig } from '../src/lib/config'
 import type { LogMetrics } from '../src/lib/log'
-import type { InjectionMethod } from '../src/lib/inject'
 
 function defaultMetrics(): LogMetrics {
   return {
@@ -15,7 +14,8 @@ function defaultMetrics(): LogMetrics {
     lastInjectionAt: 0,
     lastBookmarkAt: 0,
     lastCompactionAt: 0,
-    lastLineIsBookmark: false
+    lastLineIsBookmark: false,
+    recentAgentTimestamps: []
   }
 }
 

@@ -2,49 +2,32 @@ import { describe, test, expect } from 'bun:test'
 import { evaluateContextPressure } from '../src/context-guard'
 import { DEFAULT_CONFIG } from '../src/lib/config'
 import type { TavConfig } from '../src/lib/config'
-import type { LogMetrics } from '../src/lib/log'
-
-function defaultMetrics(): LogMetrics {
-  return {
-    toolCalls: 0,
-    agentReturns: 0,
-    estimatedTokens: 0,
-    cumulativeEstimatedTokens: 0,
-    elapsedSeconds: 0,
-    lastInjectionAt: 0,
-    lastBookmarkAt: 0,
-    lastCompactionAt: 0,
-    lastLineIsBookmark: false
-  }
-}
 
 describe('context-guard', () => {
   test('allows non-Task tool calls regardless of pressure', () => {
-    const metrics = { ...defaultMetrics(), cumulativeEstimatedTokens: 100000 }
-    const result = evaluateContextPressure(DEFAULT_CONFIG, metrics, 'Read')
+    const result = evaluateContextPressure(DEFAULT_CONFIG, 0.99, 'Read')
     expect(result.continue).toBe(true)
     expect(result.permissionDecision).toBeUndefined()
   })
 
-  test('allows Task when below denyThreshold', () => {
-    const metrics = { ...defaultMetrics(), cumulativeEstimatedTokens: 44999 }
-    const result = evaluateContextPressure(DEFAULT_CONFIG, metrics, 'Task')
+  test('allows Task when below denyPercent', () => {
+    // 0.80 < 0.85 (default denyPercent)
+    const result = evaluateContextPressure(DEFAULT_CONFIG, 0.80, 'Task')
     expect(result.continue).toBe(true)
     expect(result.permissionDecision).toBeUndefined()
   })
 
-  test('denies Task when at denyThreshold', () => {
-    const metrics = { ...defaultMetrics(), cumulativeEstimatedTokens: 45000 }
-    const result = evaluateContextPressure(DEFAULT_CONFIG, metrics, 'Task')
+  test('denies Task when at denyPercent', () => {
+    // 0.85 >= 0.85
+    const result = evaluateContextPressure(DEFAULT_CONFIG, 0.85, 'Task')
     expect(result.continue).toBe(true)
     expect(result.permissionDecision).toBe('deny')
     expect(result.reason).toContain('Context pressure critical')
-    expect(result.reason).toContain('45000')
+    expect(result.reason).toContain('85%')
   })
 
-  test('denies Task when above denyThreshold', () => {
-    const metrics = { ...defaultMetrics(), cumulativeEstimatedTokens: 60000 }
-    const result = evaluateContextPressure(DEFAULT_CONFIG, metrics, 'Task')
+  test('denies Task when above denyPercent', () => {
+    const result = evaluateContextPressure(DEFAULT_CONFIG, 0.95, 'Task')
     expect(result.continue).toBe(true)
     expect(result.permissionDecision).toBe('deny')
     expect(result.hookSpecificOutput).toBeDefined()
@@ -57,33 +40,42 @@ describe('context-guard', () => {
       ...DEFAULT_CONFIG,
       contextGuard: { ...DEFAULT_CONFIG.contextGuard, enabled: false }
     }
-    const metrics = { ...defaultMetrics(), cumulativeEstimatedTokens: 100000 }
-    const result = evaluateContextPressure(config, metrics, 'Task')
+    const result = evaluateContextPressure(config, 0.99, 'Task')
     expect(result.continue).toBe(true)
     expect(result.permissionDecision).toBeUndefined()
   })
 
-  test('uses custom denyThreshold from config', () => {
+  test('uses custom denyPercent from config', () => {
     const config: TavConfig = {
       ...DEFAULT_CONFIG,
-      contextGuard: { ...DEFAULT_CONFIG.contextGuard, denyThreshold: 10000 }
+      contextGuard: { ...DEFAULT_CONFIG.contextGuard, denyPercent: 0.50 }
     }
-    const metrics = { ...defaultMetrics(), cumulativeEstimatedTokens: 10000 }
-    const result = evaluateContextPressure(config, metrics, 'Task')
+    const result = evaluateContextPressure(config, 0.55, 'Task')
     expect(result.permissionDecision).toBe('deny')
   })
 
   test('always returns continue:true even when denying', () => {
-    const metrics = { ...defaultMetrics(), cumulativeEstimatedTokens: 100000 }
-    const result = evaluateContextPressure(DEFAULT_CONFIG, metrics, 'Task')
+    const result = evaluateContextPressure(DEFAULT_CONFIG, 0.99, 'Task')
     // continue:true is required for all hook outputs — deny is in permissionDecision
     expect(result.continue).toBe(true)
   })
 
-  test('deny reason includes both actual and threshold values', () => {
-    const metrics = { ...defaultMetrics(), cumulativeEstimatedTokens: 50000 }
-    const result = evaluateContextPressure(DEFAULT_CONFIG, metrics, 'Task')
-    expect(result.reason).toContain('50000')
-    expect(result.reason).toContain('45000')
+  test('deny reason includes percentage values', () => {
+    const result = evaluateContextPressure(DEFAULT_CONFIG, 0.90, 'Task')
+    expect(result.reason).toContain('90%')
+    expect(result.reason).toContain('85%')
+  })
+
+  test('allows Task at pressure just below threshold', () => {
+    // 0.849 < 0.85
+    const result = evaluateContextPressure(DEFAULT_CONFIG, 0.849, 'Task')
+    expect(result.continue).toBe(true)
+    expect(result.permissionDecision).toBeUndefined()
+  })
+
+  test('denies at pressure 1.0 (fully saturated)', () => {
+    const result = evaluateContextPressure(DEFAULT_CONFIG, 1.0, 'Task')
+    expect(result.permissionDecision).toBe('deny')
+    expect(result.reason).toContain('100%')
   })
 })

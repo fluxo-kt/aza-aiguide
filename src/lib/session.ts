@@ -13,6 +13,7 @@ export interface SessionConfig {
   injectionMethod: string
   injectionTarget: string
   startedAt: number
+  jsonlPath?: string           // cached JSONL path for context pressure reading (resolved at SessionStart)
   disabledReason?: string
 }
 
