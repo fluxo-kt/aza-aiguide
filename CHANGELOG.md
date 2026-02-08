@@ -2,6 +2,22 @@
 
 All notable changes to tav are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.0] — 2025-02-08
+
+### Added
+- **Smart bookmark placement** in repair tool — death zone detection (`isDeadAssistant`), text block validation (`hasTextContentBlock`), single validation gate (`isValidRewindPoint`). Only inserts bookmarks where CC's rewind UI can actually use them
+- **Backup-first repair** — restores from `.tav-backup` before re-repairing, never overwrites existing backup, detects pre-existing bookmarks
+
+### Changed
+- **Bookmarks and context guard disabled by default** — both `bookmarks.enabled` and `contextGuard.enabled` now default to `false`. Users must explicitly enable in `~/.claude/tav/config.json`. Prevents unexpected terminal injection for new installations
+- **Repair tool chain-aware** — walks parentUuid chain instead of linear file order, matching CC's rewind navigation model
+- Default repair interval changed from 5 to 1 for maximum recovery density
+
+### Fixed
+- Repair tool inserted bookmarks at positions where CC's rewind UI couldn't reach them (no assistant successor with text block)
+- Repair tool used wrong entry type `'human'` instead of `'user'` for synthetic entries
+- Synthetic entries now include `gitBranch` and `slug` fields required by CC
+
 ## [0.4.0] — 2025-02-08
 
 ### Added
