@@ -7,6 +7,8 @@ export type InjectionMethod = 'tmux' | 'screen' | 'osascript' | 'disabled';
 export interface InjectionConfig {
   method: InjectionMethod;
   target: string; // pane ID for tmux (%N), session for screen, empty for osascript/disabled
+  tabId?: string;  // terminal tab identifier (iTerm2: UUID, Terminal.app: tab index)
+  windowId?: string; // terminal window identifier
 }
 
 /**
