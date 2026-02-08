@@ -9,7 +9,7 @@ Defence-in-depth context protection for Claude Code sessions. Five layers preven
 | Hook Event | Script | Timeout | readStdin | Purpose |
 |------------|--------|---------|-----------|---------|
 | SessionStart | session-start.ts | 5s | 3000ms | Detect injection method (tmux/screen/osascript), write session config |
-| PreToolUse | context-guard.ts | 3s | 2500ms | Deny `Task` tool calls when context pressure exceeds `denyThreshold` |
+| PreToolUse | context-guard.ts | 3s | 2500ms | Deny `Task` tool calls when context pressure exceeds `denyPercent` |
 | PostToolUse | bookmark-activity.ts | 3s | 2500ms | Append `T` line to activity log |
 | SubagentStop | bookmark-activity.ts | 5s | 2500ms | Append `A` line + evaluate ALL thresholds + compaction check |
 | PreCompact | bookmark-precompact.ts | 3s | 2500ms | Reset activity window (`B` marker), inject `additionalContext` summary |
@@ -32,7 +32,7 @@ B 1707321605000          # Bookmark confirmed
 C 1707321610000          # Compaction injected (/compact sent to terminal)
 ```
 
-Two metric scopes: **windowed** (T/A lines after last `B` = current window, used for bookmark thresholds) and **cumulative** (all T/A chars across entire log, used for context guard). `meetsAnyThreshold()` in `lib/log.ts` is the **single source of truth** for threshold evaluation. `shouldInjectBookmark()` in `lib/evaluate.ts` is the **single source of truth** for guard ordering — used by both Stop and SubagentStop.
+Two metric scopes: **windowed** (T/A lines after last `B` = current window, used for bookmark thresholds) and **cumulative** (T/A chars after last `C` marker = since last compaction, used as fallback for context pressure). `meetsAnyThreshold()` in `lib/log.ts` is the **single source of truth** for threshold evaluation. `shouldInjectBookmark()` in `lib/evaluate.ts` is the **single source of truth** for guard ordering — used by both Stop and SubagentStop. `shouldCompact()` in `lib/evaluate.ts` is the **single source of truth** for compaction evaluation.
 
 ## Three-Layer Feedback Loop Prevention
 
@@ -55,7 +55,7 @@ These three barriers make infinite loops **structurally impossible**.
 
 ```bash
 bun install              # dev deps only (typescript, @types/node, bun-types)
-bun test                 # 227 tests across 13 files
+bun test                 # 295 tests across 16 files
 bun run build            # tsc -p tsconfig.build.json → dist/
 bunx tsc --noEmit        # typecheck (includes tests)
 ```
@@ -71,13 +71,17 @@ bunx tsc --noEmit        # typecheck (includes tests)
 | `src/lib/log.ts` | Activity log: append, parse, derive metrics, `meetsAnyThreshold()` |
 | `src/lib/config.ts` | Config loader with deep merge + type validation (`validNumber()`, `validateConfig()`) |
 | `src/lib/inject.ts` | Injection: detection, command building, `requestBookmark()`, `requestCompaction()` |
-| `src/lib/evaluate.ts` | `shouldInjectBookmark()` — unified guard ordering for Stop + SubagentStop |
-| `src/lib/session.ts` | `SessionConfig` type, `readSessionConfig()`, `writeSessionConfig()` |
+| `src/lib/evaluate.ts` | `shouldInjectBookmark()`, `shouldCompact()` — unified guard ordering |
+| `src/lib/context-pressure.ts` | Dual-source context pressure: JSONL tail-read (primary) + chars/4 (fallback) |
+| `src/lib/jsonl-types.ts` | Shared `JournalEntry`, `ParsedLine` types and `parseJSONL()` for repair + extract |
+| `src/lib/session.ts` | `SessionConfig` type (incl. `jsonlPath`), `readSessionConfig()`, `writeSessionConfig()` |
 | `src/lib/guards.ts` | Stop guards: `isContextLimitStop()`, `isUserAbort()` — pure functions |
 | `src/lib/stdin.ts` | Shared `readStdin(timeoutMs)` — single implementation for all hooks |
 | `src/context-guard.ts` | PreToolUse hook: denies `Task` calls when context pressure exceeds threshold |
 | `src/bookmark-precompact.ts` | PreCompact hook: resets activity window, injects summary into compaction |
 | `src/repair.ts` | Standalone CLI: JSONL surgery to insert rewind points in dead sessions |
+| `src/extract-session.ts` | JSONL preprocessor for Gemini analysis (filters noise, truncates tool_use) |
+| `skills/tav/SKILL.md` | `/tav` skill: repair, list, summarize, analyze, status commands |
 | `hooks/hooks.json` | 8 hook events → 6 scripts. Runner: bun first, node dist/ fallback |
 
 ## Configuration
@@ -91,16 +95,21 @@ bunx tsc --noEmit        # typecheck (includes tests)
 {
   "contextGuard": {
     "enabled": true,
-    "compactThreshold": 30000,
+    "contextWindowTokens": 200000,
+    "compactPercent": 0.76,
+    "denyPercent": 0.85,
     "compactCooldownSeconds": 120,
-    "denyThreshold": 45000
+    "responseRatio": 0.25
   }
 }
 ```
-- `compactThreshold`: cumulative estimated tokens before injecting `/compact` (~60% capacity)
-- `denyThreshold`: cumulative tokens before denying new `Task` tool calls (~90% capacity)
+- `compactPercent`: context pressure ratio (0–1) at which `/compact` is injected (default 76%)
+- `denyPercent`: pressure ratio at which new `Task` tool calls are denied (default 85%)
+- `contextWindowTokens`: nominal context window size (MUST match actual model — no auto-detection)
+- `responseRatio`: legacy backward-compat field for chars/4 fallback estimation
 - Compaction injects `/compact` as real user input via terminal — the only external mechanism that triggers compaction
 - Agent throttling returns `permissionDecision: "deny"` on `PreToolUse` for `Task` calls
+- Legacy `compactThreshold`/`denyThreshold` fields are auto-converted to percentages by `validateConfig()`
 
 ## Injection Fallback Chain
 
@@ -108,8 +117,35 @@ Detected once at SessionStart, stored in `~/.claude/tav/state/{id}.json`:
 
 1. **tmux** (`$TMUX` + `$TMUX_PANE`) — primary. Per-pane targeting, works regardless of foreground app
 2. **GNU Screen** (`$STY`) — `screen -X stuff`
-3. **osascript** (macOS) — lowest priority. Breaks when user switches apps. Needs Accessibility permissions
-4. **disabled** — graceful degradation, no errors
+3. **osascript** (macOS) — only when terminal process is identifiable via `$TERM_PROGRAM`. Uses process-targeted AppleScript (`tell process "X"`) to prevent keystrokes landing in wrong apps. Supported: Terminal.app, iTerm2, Warp, VS Code, Ghostty, kitty, Alacritty, Hyper. Needs Accessibility permissions
+4. **disabled** — graceful degradation, no errors. Also used when macOS terminal is unrecognised (safety over convenience)
+
+## Context Pressure System
+
+Dual-source context pressure measurement replaces absolute token thresholds:
+
+**Primary: JSONL tail-read** — reads last 64KB of `~/.claude/projects/{hash}/{sessionId}.jsonl`, scans backwards for the last `"type":"assistant"` entry, extracts `message.usage`. Effective context = `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`. O(1) relative to file size (<5ms for 25MB files).
+
+**Fallback: chars/4 estimation** — `cumulativeEstimatedTokens` from tav's activity log (T/A char counts after last `C` marker). Used when JSONL unavailable.
+
+**JSONL path resolution**: Resolved once at SessionStart via `resolveJsonlPath(sessionId)`, cached in `SessionConfig.jsonlPath`. Scans `~/.claude/projects/*/` for matching `{sessionId}.jsonl`. Returns null if not found (new session) — triggers fallback gracefully.
+
+**Concurrent write safety**: CC appends to the JSONL while hooks read. `readLastAssistantUsage()` discards the last line (may be partial) and the first line in the chunk (may be truncated mid-JSON).
+
+**Burst detection**: Emergency compaction when 5+ agent returns in 10 seconds AND pressure > 0.60 AND contextGuard is enabled. During agent cascades, the Stop hook never fires — SubagentStop is the only checkpoint.
+
+## Session JSONL Structure
+
+Session JSONL at `~/.claude/projects/{hash}/{sessionId}.jsonl` — entry type distribution:
+- `progress`: ~42.6% (tool execution status — noise)
+- `user`: ~39.8% (human messages, tool results)
+- `assistant`: ~16.2% (responses, has `message.usage` with real token counts)
+- `file-history-snapshot`: ~1% (file tracking — noise)
+
+Assistant entries contain `message.usage`:
+```json
+{"input_tokens": 3, "cache_creation_input_tokens": 1426, "cache_read_input_tokens": 160480, "output_tokens": 1}
+```
 
 ## Common Pitfalls
 
@@ -121,6 +157,11 @@ Detected once at SessionStart, stored in `~/.claude/tav/state/{id}.json`:
 - CC hooks run as separate processes — each invocation is a fresh Node/Bun process, no shared memory
 - `ensureStateDir()` calls `mkdirSync({recursive:true})` on every `appendEvent` — cheap syscall, prevents race on first write
 - Session IDs can contain any characters — `sanitizeSessionId()` replaces non-alphanumeric with `_` and truncates to 200 chars (filesystem limit is 255 minus suffix)
+- JSONL path null at SessionStart is OK — new sessions may not have a JSONL yet; falls back to chars/4
+- `cumulativeEstimatedTokens` MUST reset after last `C` marker — without this, post-compaction content is still counted, causing immediate re-trigger (compaction loop)
+- `contextWindowTokens` must match actual model — no auto-detection possible. 200K default is wrong for 1M models
+- osascript requires process-targeted injection — without it, keystrokes go to frontmost app (e.g. browser). Unknown terminals get `disabled` instead
+- Pressure ratio can exceed 1.0 (cache segments) — `getContextPressure()` clamps to `Math.min(ratio, 1.0)`
 
 ## Design Decisions & Rationale
 
@@ -134,9 +175,31 @@ Detected once at SessionStart, stored in `~/.claude/tav/state/{id}.json`:
 
 **Pre-spawn `I` marker**: Written to log BEFORE spawning the background injection process. Prevents double-bookmark race: if Stop and SubagentStop fire close together, the second sees the first's `I` line → cooldown blocks it.
 
-**Token estimation `chars/4`**: Underestimates code/JSON by ~25%. This is intentionally conservative — triggers slightly late rather than early. Precision not needed since thresholds are approximate.
+**Token estimation `chars/4`**: Underestimates code/JSON by ~25%. This is intentionally conservative — triggers slightly late rather than early. Now a fallback only — primary path uses real JSONL tokens.
+
+**Percentage-based thresholds over absolute**: Absolute token thresholds (30K/45K) don't scale across context window sizes (200K vs 1M). Percentages (76%/85%) are model-agnostic. The user sets `contextWindowTokens` once; all thresholds adapt automatically.
+
+**JSONL tail-read over full parse**: A 25MB JSONL has ~50K lines. Full parse takes ~100ms. Tail-read of 64KB takes <5ms. Since we only need the LAST assistant entry's usage, scanning backwards from the end is optimal.
+
+**JSONL path caching over per-hook glob**: Globbing `~/.claude/projects/*/` on every hook adds ~5-15ms per invocation. Resolving once at SessionStart and caching in `SessionConfig.jsonlPath` makes subsequent reads O(1). Stale path degrades to fallback gracefully.
 
 **Marker `·` (U+00B7 middle dot)**: 1 token, visually minimal in conversation, no collision with any known CC trigger or slash command. Configurable via `config.json`.
+
+## Session Skill (`/tav`)
+
+Registered via `"skills": "./skills/"` in `.claude-plugin/plugin.json`. Each skill is a `SKILL.md` with YAML frontmatter (name + description).
+
+| Command | Action |
+|---------|--------|
+| `/tav list` | List session JSONL files |
+| `/tav repair <prefix>` | Run offline JSONL surgery (`src/repair.ts`) |
+| `/tav summarize <prefix>` | Preprocess JSONL → Gemini Flash summary |
+| `/tav analyze <prefix>` | Preprocess JSONL → Gemini Pro deep analysis |
+| `/tav status` | Report current session's context pressure |
+
+**Session JSONL preprocessing** (`src/extract-session.ts`): Filters noise entries (progress, file-history-snapshot — ~44% reduction), truncates tool_use content blocks, caps output at `--max-chars` (default 500K ~125K tokens). Output is markdown suitable for Gemini consumption.
+
+**Session resolution**: searches `~/.claude/projects/{hash}/` and `~/.claude/transcripts/` for matching JSONL files. Deduplicates by session ID, sorts by mtime.
 
 ## Testing Approach
 
@@ -150,6 +213,9 @@ Key test patterns:
 - **Evaluate tests**: verify unified guard ordering in `shouldInjectBookmark()` — covers all guard paths
 - **Session tests**: round-trip `writeSessionConfig`/`readSessionConfig` with edge cases (corrupted JSON, special chars)
 - **Repair tests**: end-to-end JSONL surgery with chain validation, break point detection, dry-run, compact boundary handling
+- **Context pressure tests**: tail-read with concurrent-write safety, fallback, clamping, path resolution
+- **Extract session tests**: noise filtering, tool_use truncation, maxChars truncation, structured content blocks
+- **JSONL types tests**: parsing, malformed lines, index signature, round-trip fidelity
 
 ## Session Repair Tool
 
