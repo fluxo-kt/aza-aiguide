@@ -244,6 +244,50 @@ describe('log', () => {
     expect(metrics.recentAgentTimestamps).toContain(now - 3000)
   })
 
+  test('parseLog resets recentAgentTimestamps at B marker (windowed metric)', () => {
+    const sessionId = 'recent-agents-window-test'
+    const now = Date.now()
+
+    // Agent returns BEFORE bookmark — should NOT be collected
+    appendEvent(sessionId, `A ${now - 5000} 100`, testDir)   // 5s ago, before B
+    appendEvent(sessionId, `A ${now - 4000} 200`, testDir)   // 4s ago, before B
+    appendEvent(sessionId, `B ${now - 3000}`, testDir)        // Bookmark — resets timestamps
+    // Agent returns AFTER bookmark — should be collected
+    appendEvent(sessionId, `A ${now - 2000} 300`, testDir)   // 2s ago, after B
+    appendEvent(sessionId, `A ${now - 1000} 400`, testDir)   // 1s ago, after B
+
+    const metrics = parseLog(sessionId, testDir)
+    // Only the 2 timestamps AFTER the B marker should be collected
+    expect(metrics.recentAgentTimestamps.length).toBe(2)
+    expect(metrics.recentAgentTimestamps).toContain(now - 2000)
+    expect(metrics.recentAgentTimestamps).toContain(now - 1000)
+    // Pre-bookmark timestamps should NOT be present
+    expect(metrics.recentAgentTimestamps).not.toContain(now - 5000)
+    expect(metrics.recentAgentTimestamps).not.toContain(now - 4000)
+  })
+
+  test('parseLog recentAgentTimestamps combines time and bookmark filters', () => {
+    const sessionId = 'recent-agents-combined-test'
+    const now = Date.now()
+
+    // Old agent before B
+    appendEvent(sessionId, `A ${now - 20000} 100`, testDir)   // 20s ago, before B — too old
+    // Recent agent before B
+    appendEvent(sessionId, `A ${now - 5000} 200`, testDir)    // 5s ago, before B — excluded by B reset
+    appendEvent(sessionId, `B ${now - 4000}`, testDir)         // Bookmark
+    // Old agent after B
+    appendEvent(sessionId, `A ${now - 18000} 300`, testDir)   // 18s ago, after B — too old
+    // Recent agents after B
+    appendEvent(sessionId, `A ${now - 2000} 400`, testDir)    // 2s ago, after B — included
+    appendEvent(sessionId, `A ${now - 1000} 500`, testDir)    // 1s ago, after B — included
+
+    const metrics = parseLog(sessionId, testDir)
+    // Only recent timestamps after B marker
+    expect(metrics.recentAgentTimestamps.length).toBe(2)
+    expect(metrics.recentAgentTimestamps).toContain(now - 2000)
+    expect(metrics.recentAgentTimestamps).toContain(now - 1000)
+  })
+
   test('parseLog skips malformed lines without NaN propagation', () => {
     const sessionId = 'malformed-test'
 

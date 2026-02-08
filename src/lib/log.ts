@@ -84,10 +84,10 @@ export function parseLog(sessionId: string, stateDir: string = DEFAULT_STATE_DIR
   let lastCompactionIdx = -1
 
   const now = Date.now()
-  const recentAgentTimestamps: number[] = []
+  let recentAgentTimestamps: number[] = []
 
   // Parse all lines for global metrics (lastInjectionAt, lastBookmarkAt,
-  // lastCompactionAt, lastCompactionIdx, recentAgentTimestamps)
+  // lastCompactionAt, lastCompactionIdx)
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     const parts = line.split(' ')
@@ -99,11 +99,14 @@ export function parseLog(sessionId: string, stateDir: string = DEFAULT_STATE_DIR
       lastInjectionAt = Math.max(lastInjectionAt, timestamp)
     } else if (type === 'B') {
       lastBookmarkAt = Math.max(lastBookmarkAt, timestamp)
+      // Reset recentAgentTimestamps at bookmark — windowed metric only
+      recentAgentTimestamps = []
     } else if (type === 'C') {
       lastCompactionAt = Math.max(lastCompactionAt, timestamp)
       lastCompactionIdx = i
     } else if (type === 'A') {
       // Collect recent A timestamps for burst detection (last 15 seconds)
+      // Only collects AFTER last B reset — windowed metric
       if (now - timestamp < 15000) {
         recentAgentTimestamps.push(timestamp)
       }
