@@ -55,7 +55,7 @@ These three barriers make infinite loops **structurally impossible**.
 
 ```bash
 bun install              # dev deps only (typescript, @types/node, bun-types)
-bun test                 # 316 tests across 16 files
+bun test                 # 319 tests across 16 files
 bun run build            # tsc -p tsconfig.build.json → dist/
 bunx tsc --noEmit        # typecheck (includes tests)
 ```
@@ -132,7 +132,7 @@ Dual-source context pressure measurement replaces absolute token thresholds:
 
 **Concurrent write safety**: CC appends to the JSONL while hooks read. `readLastAssistantUsage()` always discards the last line (may be partial write). Only discards the first line when reading from mid-file (chunk boundary may split a JSON line); when reading the whole file (position=0), the first line is always complete and is kept.
 
-**Burst detection**: Emergency compaction when 5+ agent returns in 10 seconds AND pressure > `compactPercent` AND contextGuard is enabled AND injection method is not disabled AND compaction cooldown has elapsed. Respects the same `compactCooldownSeconds` as normal compaction to prevent `/compact` spam during rapid agent returns. During agent cascades, the Stop hook never fires — SubagentStop is the only checkpoint.
+**Burst detection**: Emergency compaction when 5+ agent returns in 10 seconds AND pressure > `compactPercent × 0.8` (~60% at default 76%) AND contextGuard is enabled AND injection method is not disabled AND compaction cooldown has elapsed. The lower threshold (~60% vs 76%) gives early warning during rapid agent cascades before normal compaction kicks in. Respects the same `compactCooldownSeconds` as normal compaction to prevent `/compact` spam. During agent cascades, the Stop hook never fires — SubagentStop is the only checkpoint.
 
 ## Session JSONL Structure
 
@@ -163,7 +163,7 @@ Assistant entries contain `message.usage`:
 - osascript requires process-targeted injection — without it, keystrokes go to frontmost app (e.g. browser). Unknown terminals get `disabled` instead
 - Pressure ratio can exceed 1.0 (cache segments) — `getContextPressure()` clamps to `Math.min(ratio, 1.0)`
 - `recentAgentTimestamps` MUST reset at B markers — without this, pre-bookmark agent timestamps persist, causing false burst detection
-- Burst detection threshold MUST use `config.contextGuard.compactPercent`, never hardcoded values — hardcoded 0.60 caused premature compaction at 55%
+- Burst detection threshold uses `compactPercent × 0.8` (~60% at default 76%) — lower than normal compaction for early warning during cascades. Never use the same threshold as `shouldCompact()` (makes burst path dead code) or hardcoded values (don't scale with custom config)
 
 ## Design Decisions & Rationale
 
