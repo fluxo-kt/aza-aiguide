@@ -26,6 +26,14 @@ exports.DEFAULT_CONFIG = {
         compactCooldownSeconds: 120,
         responseRatio: 0.25,
     },
+    sessionLocation: {
+        enabled: false,
+        verifyTab: false,
+        terminals: {
+            iterm2: { tabVerification: false },
+            terminal: { tabVerification: false },
+        },
+    },
 };
 /**
  * Deep merge helper that recursively merges partial config into defaults
@@ -115,6 +123,8 @@ function validateConfig(config, rawContextGuard) {
             }
         }
     }
+    const dsl = exports.DEFAULT_CONFIG.sessionLocation;
+    const sl = config.sessionLocation;
     return {
         bookmarks: {
             enabled: typeof config.bookmarks.enabled === 'boolean'
@@ -138,6 +148,22 @@ function validateConfig(config, rawContextGuard) {
             denyPercent,
             compactCooldownSeconds: validNumber(cg.compactCooldownSeconds, dcg.compactCooldownSeconds),
             responseRatio,
+        },
+        sessionLocation: {
+            enabled: typeof sl.enabled === 'boolean' ? sl.enabled : dsl.enabled,
+            verifyTab: typeof sl.verifyTab === 'boolean' ? sl.verifyTab : dsl.verifyTab,
+            terminals: {
+                iterm2: {
+                    tabVerification: typeof sl.terminals?.iterm2?.tabVerification === 'boolean'
+                        ? sl.terminals.iterm2.tabVerification
+                        : dsl.terminals.iterm2.tabVerification,
+                },
+                terminal: {
+                    tabVerification: typeof sl.terminals?.terminal?.tabVerification === 'boolean'
+                        ? sl.terminals.terminal.tabVerification
+                        : dsl.terminals.terminal.tabVerification,
+                },
+            },
         },
     };
 }

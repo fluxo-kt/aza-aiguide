@@ -25,9 +25,23 @@ export interface ContextGuardConfig {
   responseRatio: number          // chars-to-tokens ratio for fallback estimation (default: 0.25 = chars/4)
 }
 
+export interface SessionLocationConfig {
+  enabled: boolean
+  verifyTab: boolean
+  terminals: {
+    iterm2: {
+      tabVerification: boolean
+    }
+    terminal: {
+      tabVerification: boolean
+    }
+  }
+}
+
 export interface TavConfig {
   bookmarks: BookmarkConfig
   contextGuard: ContextGuardConfig
+  sessionLocation: SessionLocationConfig
 }
 
 export const DEFAULT_CONFIG: TavConfig = {
@@ -49,6 +63,14 @@ export const DEFAULT_CONFIG: TavConfig = {
     denyPercent: 0.85,
     compactCooldownSeconds: 120,
     responseRatio: 0.25,
+  },
+  sessionLocation: {
+    enabled: false,
+    verifyTab: false,
+    terminals: {
+      iterm2: { tabVerification: false },
+      terminal: { tabVerification: false },
+    },
   },
 }
 
@@ -155,6 +177,9 @@ function validateConfig(config: TavConfig, rawContextGuard?: Record<string, unkn
     }
   }
 
+  const dsl = DEFAULT_CONFIG.sessionLocation
+  const sl = config.sessionLocation
+
   return {
     bookmarks: {
       enabled: typeof config.bookmarks.enabled === 'boolean'
@@ -178,6 +203,22 @@ function validateConfig(config: TavConfig, rawContextGuard?: Record<string, unkn
       denyPercent,
       compactCooldownSeconds: validNumber(cg.compactCooldownSeconds, dcg.compactCooldownSeconds),
       responseRatio,
+    },
+    sessionLocation: {
+      enabled: typeof sl.enabled === 'boolean' ? sl.enabled : dsl.enabled,
+      verifyTab: typeof sl.verifyTab === 'boolean' ? sl.verifyTab : dsl.verifyTab,
+      terminals: {
+        iterm2: {
+          tabVerification: typeof sl.terminals?.iterm2?.tabVerification === 'boolean'
+            ? sl.terminals.iterm2.tabVerification
+            : dsl.terminals.iterm2.tabVerification,
+        },
+        terminal: {
+          tabVerification: typeof sl.terminals?.terminal?.tabVerification === 'boolean'
+            ? sl.terminals.terminal.tabVerification
+            : dsl.terminals.terminal.tabVerification,
+        },
+      },
     },
   }
 }
