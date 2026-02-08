@@ -55,7 +55,7 @@ These three barriers make infinite loops **structurally impossible**.
 
 ```bash
 bun install              # dev deps only (typescript, @types/node, bun-types)
-bun test                 # 299 tests across 16 files
+bun test                 # 316 tests across 16 files
 bun run build            # tsc -p tsconfig.build.json → dist/
 bunx tsc --noEmit        # typecheck (includes tests)
 ```
@@ -70,11 +70,11 @@ bunx tsc --noEmit        # typecheck (includes tests)
 |------|------|
 | `src/lib/log.ts` | Activity log: append, parse, derive metrics, `meetsAnyThreshold()` |
 | `src/lib/config.ts` | Config loader with deep merge + type validation (`validNumber()`, `validateConfig()`) |
-| `src/lib/inject.ts` | Injection: detection, command building, `requestBookmark()`, `requestCompaction()` |
+| `src/lib/inject.ts` | Injection: detection, command building, `requestBookmark()`, `requestCompaction()`, `detectSessionLocation()`, `verifyLocation()` |
 | `src/lib/evaluate.ts` | `shouldInjectBookmark()`, `shouldCompact()` — unified guard ordering |
 | `src/lib/context-pressure.ts` | Dual-source context pressure: JSONL tail-read (primary) + chars/4 (fallback) |
 | `src/lib/jsonl-types.ts` | Shared `JournalEntry`, `ParsedLine` types and `parseJSONL()` for repair + extract |
-| `src/lib/session.ts` | `SessionConfig` type (incl. `jsonlPath`), `readSessionConfig()`, `writeSessionConfig()` |
+| `src/lib/session.ts` | `SessionConfig` type (incl. `jsonlPath`, `cachedConfig`, `SessionLocation`), `readSessionConfig()`, `writeSessionConfig()` (atomic via tmp+rename) |
 | `src/lib/guards.ts` | Stop guards: `isContextLimitStop()`, `isUserAbort()` — pure functions |
 | `src/lib/stdin.ts` | Shared `readStdin(timeoutMs)` — single implementation for all hooks |
 | `src/context-guard.ts` | PreToolUse hook: denies `Task` calls when context pressure exceeds threshold |
@@ -124,7 +124,7 @@ Detected once at SessionStart, stored in `~/.claude/tav/state/{id}.json`:
 
 Dual-source context pressure measurement replaces absolute token thresholds:
 
-**Primary: JSONL tail-read** — reads last 64KB of `~/.claude/projects/{hash}/{sessionId}.jsonl`, scans backwards for the last `"type":"assistant"` entry, extracts `message.usage`. Effective context = `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`. O(1) relative to file size (<5ms for 25MB files).
+**Primary: JSONL tail-read** — reads last 64KB of `~/.claude/projects/{hash}/{sessionId}.jsonl`, collects ALL `"type":"assistant"` entries with `message.usage`, returns the one with highest `timestamp` (most recent). This prevents cache segments from causing stale high-token readings. Effective context = `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`. O(1) relative to file size (<5ms for 25MB files).
 
 **Fallback: chars/4 estimation** — `cumulativeEstimatedTokens` from tav's activity log (T/A char counts after last `C` marker, divided by 4). Scaled by `responseRatio` to convert response-only tokens to full-context pressure: `cumulativeEstimatedTokens / (windowTokens × responseRatio)`. Without this scaling, the fallback would need ~4× more tokens to trigger. Used when JSONL unavailable.
 
@@ -132,7 +132,7 @@ Dual-source context pressure measurement replaces absolute token thresholds:
 
 **Concurrent write safety**: CC appends to the JSONL while hooks read. `readLastAssistantUsage()` always discards the last line (may be partial write). Only discards the first line when reading from mid-file (chunk boundary may split a JSON line); when reading the whole file (position=0), the first line is always complete and is kept.
 
-**Burst detection**: Emergency compaction when 5+ agent returns in 10 seconds AND pressure > 0.60 AND contextGuard is enabled AND injection method is not disabled AND compaction cooldown has elapsed. Respects the same `compactCooldownSeconds` as normal compaction to prevent `/compact` spam during rapid agent returns. During agent cascades, the Stop hook never fires — SubagentStop is the only checkpoint.
+**Burst detection**: Emergency compaction when 5+ agent returns in 10 seconds AND pressure > `compactPercent` AND contextGuard is enabled AND injection method is not disabled AND compaction cooldown has elapsed. Respects the same `compactCooldownSeconds` as normal compaction to prevent `/compact` spam during rapid agent returns. During agent cascades, the Stop hook never fires — SubagentStop is the only checkpoint.
 
 ## Session JSONL Structure
 
@@ -162,6 +162,8 @@ Assistant entries contain `message.usage`:
 - `contextWindowTokens` must match actual model — no auto-detection possible. 200K default is wrong for 1M models
 - osascript requires process-targeted injection — without it, keystrokes go to frontmost app (e.g. browser). Unknown terminals get `disabled` instead
 - Pressure ratio can exceed 1.0 (cache segments) — `getContextPressure()` clamps to `Math.min(ratio, 1.0)`
+- `recentAgentTimestamps` MUST reset at B markers — without this, pre-bookmark agent timestamps persist, causing false burst detection
+- Burst detection threshold MUST use `config.contextGuard.compactPercent`, never hardcoded values — hardcoded 0.60 caused premature compaction at 55%
 
 ## Design Decisions & Rationale
 
@@ -182,6 +184,12 @@ Assistant entries contain `message.usage`:
 **JSONL tail-read over full parse**: A 25MB JSONL has ~50K lines. Full parse takes ~100ms. Tail-read of 64KB takes <5ms. Since we only need the LAST assistant entry's usage, scanning backwards from the end is optimal.
 
 **JSONL path caching over per-hook glob**: Globbing `~/.claude/projects/*/` on every hook adds ~5-15ms per invocation. Resolving once at SessionStart and caching in `SessionConfig.jsonlPath` makes subsequent reads O(1). Stale path degrades to fallback gracefully.
+
+**Config caching over per-hook loadConfig()**: Each hook runs as a separate process. Without caching, editing `config.json` mid-session applies changes inconsistently — one hook may read the old config while another reads the new one. Caching once at SessionStart ensures all hooks use identical config throughout the session. Fallback to `loadConfig()` preserves backward compatibility.
+
+**JSONL most-recent-by-timestamp over last-found**: Cache segments can create assistant entries with inflated token counts (183K) that appear after the actual most recent entry (5K). Sorting by `timestamp` field and returning the highest ensures accurate pressure readings regardless of file order.
+
+**Atomic session config writes**: Uses write-to-tmp + `renameSync` instead of direct `writeFileSync`. POSIX `rename()` is atomic — prevents partial writes if the process is killed mid-write. Without this, concurrent hooks could read half-written JSON.
 
 **Marker `·` (U+00B7 middle dot)**: 1 token, visually minimal in conversation, no collision with any known CC trigger or slash command. Configurable via `config.json`.
 
@@ -232,6 +240,44 @@ bun run src/repair.ts <prefix> --interval 3       # Break every 3 assistant entr
 Creates `.tav-backup` before modifying. Inserts synthetic user messages (`·`) at break points (every N assistant entries, turn boundaries, time gaps). Repairs UUID chain. Validates integrity.
 
 **WARNING**: CC loading repaired JSONL as rewind points is UNVERIFIED. Always test on a non-critical session first.
+
+## Config Caching (Hot-Reload Race Prevention)
+
+All 5 downstream hooks read config from `SessionConfig.cachedConfig` (typed as `TavConfig`) instead of calling `loadConfig()` independently. Config is loaded once at SessionStart and cached in the session config file. This prevents mid-session config changes from causing non-deterministic behaviour across hooks (e.g. one hook using old thresholds, another using new ones).
+
+Fallback: if `cachedConfig` is undefined (session started before caching was implemented), hooks fall back to `loadConfig()`.
+
+## Session Location (Opt-In Targeting Verification)
+
+Optional feature to prevent keystrokes landing in the wrong terminal tab/pane. Disabled by default (`sessionLocation.enabled: false`).
+
+When enabled, `detectSessionLocation()` captures terminal identifiers at SessionStart (tmux pane ID, screen session, terminal app name) and stores them in `SessionConfig.location`. Before injection, `verifyLocation()` compares declared location against current environment — injection is skipped on mismatch.
+
+Four-tier graceful degradation: feature disabled → pass, no declared location → pass, detection failure → pass, mismatch → block.
+
+```json
+{
+  "sessionLocation": {
+    "enabled": false,
+    "verifyTab": false,
+    "terminals": {
+      "iterm2": { "tabVerification": false },
+      "terminal": { "tabVerification": false }
+    }
+  }
+}
+```
+
+## SessionStart Incremental Writes
+
+SessionStart writes config incrementally to prevent downstream hook failures if the hook crashes mid-execution. Each detection step updates the session config file via atomic write (write to `.tmp`, then `renameSync`):
+
+1. Write minimal config immediately (sessionId, startedAt, injectionMethod: 'detecting', cachedConfig)
+2. Update with injection method after detection
+3. Update with JSONL path after resolution
+4. Update with session location after detection (if enabled)
+
+If SessionStart crashes after step 1, downstream hooks still have a valid config to read.
 
 ## Multi-Session Safety
 
