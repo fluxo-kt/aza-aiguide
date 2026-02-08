@@ -55,7 +55,7 @@ These three barriers make infinite loops **structurally impossible**.
 
 ```bash
 bun install              # dev deps only (typescript, @types/node, bun-types)
-bun test                 # 295 tests across 16 files
+bun test                 # 299 tests across 16 files
 bun run build            # tsc -p tsconfig.build.json → dist/
 bunx tsc --noEmit        # typecheck (includes tests)
 ```
@@ -106,7 +106,7 @@ bunx tsc --noEmit        # typecheck (includes tests)
 - `compactPercent`: context pressure ratio (0–1) at which `/compact` is injected (default 76%)
 - `denyPercent`: pressure ratio at which new `Task` tool calls are denied (default 85%)
 - `contextWindowTokens`: nominal context window size (MUST match actual model — no auto-detection)
-- `responseRatio`: legacy backward-compat field for chars/4 fallback estimation
+- `responseRatio`: fraction of context that is response content (default 0.25). Used by fallback pressure calculation: `cumulativeEstimatedTokens / (windowTokens × responseRatio)`. Also used for legacy threshold-to-percentage conversion
 - Compaction injects `/compact` as real user input via terminal — the only external mechanism that triggers compaction
 - Agent throttling returns `permissionDecision: "deny"` on `PreToolUse` for `Task` calls
 - Legacy `compactThreshold`/`denyThreshold` fields are auto-converted to percentages by `validateConfig()`
@@ -126,13 +126,13 @@ Dual-source context pressure measurement replaces absolute token thresholds:
 
 **Primary: JSONL tail-read** — reads last 64KB of `~/.claude/projects/{hash}/{sessionId}.jsonl`, scans backwards for the last `"type":"assistant"` entry, extracts `message.usage`. Effective context = `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`. O(1) relative to file size (<5ms for 25MB files).
 
-**Fallback: chars/4 estimation** — `cumulativeEstimatedTokens` from tav's activity log (T/A char counts after last `C` marker). Used when JSONL unavailable.
+**Fallback: chars/4 estimation** — `cumulativeEstimatedTokens` from tav's activity log (T/A char counts after last `C` marker, divided by 4). Scaled by `responseRatio` to convert response-only tokens to full-context pressure: `cumulativeEstimatedTokens / (windowTokens × responseRatio)`. Without this scaling, the fallback would need ~4× more tokens to trigger. Used when JSONL unavailable.
 
 **JSONL path resolution**: Resolved once at SessionStart via `resolveJsonlPath(sessionId)`, cached in `SessionConfig.jsonlPath`. Scans `~/.claude/projects/*/` for matching `{sessionId}.jsonl`. Returns null if not found (new session) — triggers fallback gracefully.
 
-**Concurrent write safety**: CC appends to the JSONL while hooks read. `readLastAssistantUsage()` discards the last line (may be partial) and the first line in the chunk (may be truncated mid-JSON).
+**Concurrent write safety**: CC appends to the JSONL while hooks read. `readLastAssistantUsage()` always discards the last line (may be partial write). Only discards the first line when reading from mid-file (chunk boundary may split a JSON line); when reading the whole file (position=0), the first line is always complete and is kept.
 
-**Burst detection**: Emergency compaction when 5+ agent returns in 10 seconds AND pressure > 0.60 AND contextGuard is enabled. During agent cascades, the Stop hook never fires — SubagentStop is the only checkpoint.
+**Burst detection**: Emergency compaction when 5+ agent returns in 10 seconds AND pressure > 0.60 AND contextGuard is enabled AND injection method is not disabled AND compaction cooldown has elapsed. Respects the same `compactCooldownSeconds` as normal compaction to prevent `/compact` spam during rapid agent returns. During agent cascades, the Stop hook never fires — SubagentStop is the only checkpoint.
 
 ## Session JSONL Structure
 
