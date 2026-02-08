@@ -16,7 +16,9 @@ const os_1 = require("os");
  *
  * Concurrent write safety:
  * - Discards the very last line (may be a partial write from CC appending)
- * - Discards the first line in the chunk (may be truncated mid-JSON)
+ * - Discards the first line ONLY when reading from mid-file (chunk boundary
+ *   may split a JSON line). When reading the whole file (position=0),
+ *   the first line is always complete.
  *
  * Returns null on any failure (missing file, no assistant entries, parse error).
  */
@@ -35,12 +37,15 @@ function readLastAssistantUsage(jsonlPath, chunkSize = 65536) {
         (0, fs_1.readSync)(fd, buffer, 0, readSize, position);
         const chunk = buffer.toString('utf-8');
         const lines = chunk.split('\n');
-        // Discard first line (may be truncated if we started mid-line)
-        // Discard last line (may be incomplete from concurrent CC write)
-        // Need at least 3 lines for this to produce any valid lines
-        if (lines.length < 3)
+        // Always discard last line (may be incomplete from concurrent CC write).
+        // Only discard first line when reading from mid-file (position > 0),
+        // because the chunk boundary may split a JSON line. When reading the
+        // whole file (position === 0), the first line is always complete.
+        const startSlice = position > 0 ? 1 : 0;
+        const minLines = startSlice + 2; // need at least 1 valid line + discarded last
+        if (lines.length < minLines)
             return null;
-        const validLines = lines.slice(1, -1);
+        const validLines = lines.slice(startSlice, -1);
         // Scan backwards for last assistant entry with usage data
         for (let i = validLines.length - 1; i >= 0; i--) {
             const line = validLines[i].trim();
@@ -86,12 +91,13 @@ function readLastAssistantUsage(jsonlPath, chunkSize = 65536) {
  * Computes context pressure as a 0–1 ratio.
  *
  * Primary path: real JSONL tokens / contextWindowTokens
- * Fallback path: cumulativeEstimatedTokens (chars/4) / contextWindowTokens
+ * Fallback path: cumulativeEstimatedTokens / (contextWindowTokens × responseRatio)
  *
- * The fallback uses raw token estimate against the full window (not scaled by
- * responseRatio) because cumulativeEstimatedTokens already represents response
- * content only, while contextWindowTokens is the total window. The responseRatio
- * field exists for legacy backward-compat conversion only.
+ * The fallback scales by responseRatio because cumulativeEstimatedTokens counts
+ * only tool/agent response content (a fraction of full context). responseRatio
+ * (default 0.25) estimates that response content is ~25% of the total window.
+ * Without this scaling, the fallback would need ~4× more tokens to trigger —
+ * e.g. 152K response tokens instead of 38K at compactPercent=0.76.
  *
  * Returns 0 when both sources are unavailable.
  * Clamped to [0, 1.0] — cache segments can occasionally push effective tokens
@@ -108,9 +114,14 @@ function getContextPressure(jsonlPath, cumulativeEstimatedTokens, config) {
             return Math.min(realTokens / windowTokens, 1.0);
         }
     }
-    // Fallback: chars/4 estimation from activity log
+    // Fallback: chars/4 estimation from activity log, scaled by responseRatio.
+    // cumulativeEstimatedTokens counts response content only (~25% of total context).
+    // Dividing by (windowTokens × responseRatio) converts to full-context pressure.
     if (cumulativeEstimatedTokens > 0) {
-        return Math.min(cumulativeEstimatedTokens / windowTokens, 1.0);
+        const effectiveWindow = windowTokens * config.responseRatio;
+        if (effectiveWindow <= 0)
+            return 0;
+        return Math.min(cumulativeEstimatedTokens / effectiveWindow, 1.0);
     }
     return 0;
 }

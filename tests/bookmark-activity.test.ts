@@ -351,8 +351,10 @@ describe('bookmark-activity', () => {
         injectionTarget: '%1'
       })
 
-      // Need cumulative tokens >= 76% of 200000 = 152000 tokens = 608000 chars
-      // Use 250 T lines × 2500 chars = 625000 chars = 156250 tokens (~78%)
+      // Fallback pressure = cumulativeEstimatedTokens / (windowTokens × responseRatio)
+      // = cumulativeEstimatedTokens / (200000 × 0.25) = cumulativeEstimatedTokens / 50000
+      // Need >= 0.76, so need >= 38000 tokens = 152000 chars
+      // Use 250 T lines × 2500 chars = 625000 chars = 156250 tokens (pressure 1.0, clamped)
       const logPath = getLogPath(TEST_SESSION_ID, logDir)
       const now = Date.now()
       let logContent = ''
@@ -378,7 +380,7 @@ describe('bookmark-activity', () => {
       })
 
       // Pre-populate with enough chars + a recent C line (within cooldown)
-      // After C marker, need >= 76% of 200000 = 152000 tokens = 608000 chars
+      // After C marker, fallback pressure = tokens / 50000, need >= 0.76 → >= 38000 tokens
       const logPath = getLogPath(TEST_SESSION_ID, logDir)
       const now = Date.now()
       let logContent = `C ${now - 5000}\n`  // Compaction 5s ago (cooldown is 120s)
@@ -426,6 +428,62 @@ describe('bookmark-activity', () => {
       const lines = log.trim().split('\n')
       const cLines = lines.filter(line => line.startsWith('C '))
 
+      expect(cLines.length).toBe(0)
+    })
+
+    test('burst compaction respects cooldown (prevents /compact spam)', () => {
+      writeSessionConfig(TEST_SESSION_ID, stateDir, {
+        injectionMethod: 'tmux',
+        injectionTarget: '%1'
+      })
+
+      // Pre-populate with a recent C line AND 5+ recent A lines at >60% pressure
+      // This creates the burst condition but cooldown should block extra compaction
+      const logPath = getLogPath(TEST_SESSION_ID, logDir)
+      const now = Date.now()
+      let logContent = `C ${now - 30000}\n`  // Compaction 30s ago (cooldown is 120s)
+      // 5 recent A lines (burst) with enough chars for >60% fallback pressure
+      // Need > 0.60 × 50000 = 30000 tokens = 120000 chars after C
+      for (let i = 0; i < 5; i++) {
+        logContent += `A ${now - 8000 + i * 1000} 25000\n`  // 125000 chars total
+      }
+      writeFileSync(logPath, logContent)
+
+      const data = { output: 'test' }
+      handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
+
+      const log = readLog(TEST_SESSION_ID, logDir)
+      const lines = log.trim().split('\n')
+      const cLines = lines.filter(line => line.startsWith('C '))
+
+      // Should still have only the original C line — both shouldCompact AND
+      // burstCompact are blocked by cooldown (30s < 120s)
+      expect(cLines.length).toBe(1)
+    })
+
+    test('burst compaction does not fire when injection disabled', () => {
+      writeSessionConfig(TEST_SESSION_ID, stateDir, {
+        injectionMethod: 'disabled',
+        injectionTarget: ''
+      })
+
+      // Pre-populate with 5+ recent A lines at >60% pressure (no recent C)
+      const logPath = getLogPath(TEST_SESSION_ID, logDir)
+      const now = Date.now()
+      let logContent = ''
+      for (let i = 0; i < 5; i++) {
+        logContent += `A ${now - 8000 + i * 1000} 25000\n`
+      }
+      writeFileSync(logPath, logContent)
+
+      const data = { output: 'test' }
+      handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
+
+      const log = readLog(TEST_SESSION_ID, logDir)
+      const lines = log.trim().split('\n')
+      const cLines = lines.filter(line => line.startsWith('C '))
+
+      // No compaction — injection is disabled, burstCompact should not fire
       expect(cLines.length).toBe(0)
     })
 

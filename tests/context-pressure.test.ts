@@ -95,10 +95,21 @@ describe('readLastAssistantUsage', () => {
     expect(readLastAssistantUsage(path)).toBeNull()
   })
 
-  test('handles file with fewer than 3 lines', () => {
+  test('finds assistant entry in whole-file read (first line not discarded)', () => {
     const path = join(tempDir, 'short.jsonl')
-    writeFileSync(path, JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100 } } }) + '\n')
-    // Only 2 lines after split (content + empty), less than 3 → null
+    // Single assistant entry — when reading the whole file (position=0),
+    // the first line is complete and should NOT be discarded.
+    writeFileSync(path, JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, cache_creation_input_tokens: 0, cache_read_input_tokens: 900 } } }) + '\n')
+    // position=0 (whole file), first line is kept → finds the entry (100 + 0 + 900 = 1000)
+    expect(readLastAssistantUsage(path)).toBe(1000)
+  })
+
+  test('returns null for single line without trailing newline', () => {
+    const path = join(tempDir, 'no-newline.jsonl')
+    // Single line without trailing newline — only 1 element after split,
+    // which is both the first and last line. Must discard last line for
+    // concurrent write safety, leaving nothing.
+    writeFileSync(path, JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100 } } }))
     expect(readLastAssistantUsage(path)).toBeNull()
   })
 
@@ -162,15 +173,15 @@ describe('getContextPressure', () => {
     expect(pressure).toBe(0.5)
   })
 
-  test('falls back to cumulative estimation when JSONL unavailable', () => {
-    const pressure = getContextPressure(null, 50000, defaultContextGuard)
-    // Fallback: 50000 / 200000 = 0.25
+  test('falls back to cumulative estimation scaled by responseRatio', () => {
+    const pressure = getContextPressure(null, 12500, defaultContextGuard)
+    // Fallback: 12500 / (200000 × 0.25) = 12500 / 50000 = 0.25
     expect(pressure).toBe(0.25)
   })
 
   test('falls back to cumulative when JSONL path is null', () => {
-    const pressure = getContextPressure(null, 100000, defaultContextGuard)
-    // 100000 / 200000 = 0.5
+    const pressure = getContextPressure(null, 25000, defaultContextGuard)
+    // 25000 / (200000 × 0.25) = 25000 / 50000 = 0.5
     expect(pressure).toBe(0.5)
   })
 
@@ -189,8 +200,8 @@ describe('getContextPressure', () => {
   })
 
   test('clamps fallback pressure to 1.0', () => {
-    // 300000 cumulative / 200000 window = 1.5, clamped to 1.0
-    const pressure = getContextPressure(null, 300000, defaultContextGuard)
+    // 60000 cumulative / (200000 × 0.25) = 60000 / 50000 = 1.2, clamped to 1.0
+    const pressure = getContextPressure(null, 60000, defaultContextGuard)
     expect(pressure).toBe(1.0)
   })
 
@@ -200,9 +211,14 @@ describe('getContextPressure', () => {
   })
 
   test('falls back to cumulative when JSONL file does not exist', () => {
-    const pressure = getContextPressure('/nonexistent/path.jsonl', 40000, defaultContextGuard)
-    // JSONL fails → fallback: 40000 / 200000 = 0.2
+    const pressure = getContextPressure('/nonexistent/path.jsonl', 10000, defaultContextGuard)
+    // JSONL fails → fallback: 10000 / (200000 × 0.25) = 10000 / 50000 = 0.2
     expect(pressure).toBe(0.2)
+  })
+
+  test('returns 0 when responseRatio is 0 (fallback path)', () => {
+    const config = { ...defaultContextGuard, responseRatio: 0 }
+    expect(getContextPressure(null, 50000, config)).toBe(0)
   })
 })
 
