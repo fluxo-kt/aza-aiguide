@@ -4,6 +4,7 @@ import { appendEvent } from './log'
 import type { SessionLocation } from './session'
 import type { TavConfig } from './config'
 
+export type { SessionLocation }
 export type InjectionMethod = 'tmux' | 'screen' | 'osascript' | 'disabled';
 
 export interface InjectionConfig {

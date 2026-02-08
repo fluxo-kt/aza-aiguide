@@ -4,8 +4,8 @@ import { writeFileSync } from 'fs'
 import { loadConfig } from './lib/config'
 import type { TavConfig } from './lib/config'
 import { ensureStateDir, getLogPath, cleanOldSessions } from './lib/log'
-import { detectInjectionMethod, checkAccessibilityPermission } from './lib/inject'
-import type { InjectionConfig } from './lib/inject'
+import { detectInjectionMethod, checkAccessibilityPermission, detectSessionLocation } from './lib/inject'
+import type { InjectionConfig, SessionLocation } from './lib/inject'
 import { readStdin } from './lib/stdin'
 import { writeSessionConfig } from './lib/session'
 import type { SessionConfig } from './lib/session'
@@ -59,6 +59,17 @@ async function main(): Promise<void> {
       }
     }
 
+    // Detect session location (only if enabled in config)
+    let location: SessionLocation | undefined
+    if (config.sessionLocation.enabled) {
+      const detected = detectSessionLocation()
+      if (detected) {
+        location = detected
+      } else {
+        console.error('tav: Failed to detect session location (hostname/directory unavailable)')
+      }
+    }
+
     // Ensure state directory exists
     ensureStateDir()
 
@@ -72,7 +83,8 @@ async function main(): Promise<void> {
       injectionTarget: injection.target,
       startedAt: Date.now(),
       ...(jsonlPath ? { jsonlPath } : {}),
-      ...(disabledReason ? { disabledReason } : {})
+      ...(disabledReason ? { disabledReason } : {}),
+      ...(location ? { location } : {})
     }
 
     writeSessionConfig(sessionId, sessionConfig)

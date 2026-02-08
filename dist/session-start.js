@@ -42,6 +42,17 @@ async function main() {
                     'Until then, you can still type \u00B7 manually to create bookmark anchor points.');
             }
         }
+        // Detect session location (only if enabled in config)
+        let location;
+        if (config.sessionLocation.enabled) {
+            const detected = (0, inject_1.detectSessionLocation)();
+            if (detected) {
+                location = detected;
+            }
+            else {
+                console.error('tav: Failed to detect session location (hostname/directory unavailable)');
+            }
+        }
         // Ensure state directory exists
         (0, log_1.ensureStateDir)();
         // Resolve JSONL path for context pressure reading (cached for all hooks)
@@ -53,7 +64,8 @@ async function main() {
             injectionTarget: injection.target,
             startedAt: Date.now(),
             ...(jsonlPath ? { jsonlPath } : {}),
-            ...(disabledReason ? { disabledReason } : {})
+            ...(disabledReason ? { disabledReason } : {}),
+            ...(location ? { location } : {})
         };
         (0, session_1.writeSessionConfig)(sessionId, sessionConfig);
         // Create empty activity log (exclusive create — if a concurrent hook
