@@ -33,10 +33,12 @@ function handlePostToolUse(sessionId, data, logDir) {
 function handleSubagentStop(sessionId, data, logDir, sessionStateDir, configPath) {
     const charCount = measureSize(data.output ?? data.result ?? data.response ?? data.agent_output);
     (0, log_1.appendEvent)(sessionId, `A ${Date.now()} ${charCount}`, logDir);
-    const config = (0, config_1.loadConfig)(configPath);
     const metrics = (0, log_1.parseLog)(sessionId, logDir);
     // Read session config ONCE — shared by both compaction and bookmark evaluation
     const sessionConfig = (0, session_1.readSessionConfig)(sessionId, sessionStateDir);
+    // Use cached config from SessionStart (prevents hot-reload race)
+    // Fallback to loadConfig() only if session started before config caching was implemented
+    const config = sessionConfig?.cachedConfig || (0, config_1.loadConfig)(configPath);
     const injectionMethod = sessionConfig?.injectionMethod ?? 'disabled';
     const injectionTarget = sessionConfig?.injectionTarget ?? '';
     const jsonlPath = sessionConfig?.jsonlPath ?? null;

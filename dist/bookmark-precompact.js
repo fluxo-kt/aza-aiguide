@@ -20,12 +20,14 @@ function processPreCompact(sessionId, logDir, sessionStateDir) {
     // After compaction, old T/A lines represent tokens that no longer exist
     // in the context. The B marker ensures thresholds start from zero.
     (0, log_1.appendEvent)(sessionId, `B ${Date.now()}`, logDir);
+    // Read session config for cached config and JSONL path
+    const sessionConfig = (0, session_1.readSessionConfig)(sessionId, sessionStateDir);
     // Optionally compute real context pressure for informational message
     let pressureInfo = '';
     try {
-        const sessionConfig = (0, session_1.readSessionConfig)(sessionId, sessionStateDir);
         if (sessionConfig?.jsonlPath) {
-            const config = (0, config_1.loadConfig)();
+            // Use cached config from SessionStart (prevents hot-reload race)
+            const config = sessionConfig.cachedConfig || (0, config_1.loadConfig)();
             const pressure = (0, context_pressure_1.getContextPressure)(sessionConfig.jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard);
             pressureInfo = ` Context pressure at compaction: ${(pressure * 100).toFixed(0)}%.`;
         }

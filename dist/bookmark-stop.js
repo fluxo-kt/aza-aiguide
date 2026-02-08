@@ -32,7 +32,6 @@ function evaluateBookmark(data, config, metrics, injectionMethod) {
  */
 async function main() {
     try {
-        const config = (0, config_1.loadConfig)();
         const input = await (0, stdin_1.readStdin)(4000);
         const data = JSON.parse(input);
         // Normalize field names (camelCase variants)
@@ -47,6 +46,9 @@ async function main() {
             console.log(JSON.stringify({ continue: true }));
             return;
         }
+        // Use cached config from SessionStart (prevents hot-reload race)
+        // Fallback to loadConfig() only if session started before config caching was implemented
+        const config = sessionConfig.cachedConfig || (0, config_1.loadConfig)();
         const injectionMethod = (sessionConfig.injectionMethod || 'disabled');
         const injectionTarget = sessionConfig.injectionTarget || '';
         const jsonlPath = sessionConfig.jsonlPath ?? null;

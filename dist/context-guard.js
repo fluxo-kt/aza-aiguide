@@ -49,10 +49,12 @@ async function main() {
             console.log(JSON.stringify({ continue: true }));
             return;
         }
-        const config = (0, config_1.loadConfig)();
         const metrics = (0, log_1.parseLog)(sessionId);
-        // Read cached JSONL path from session config for real token pressure
+        // Read session config ONCE — provides cached config and JSONL path
         const sessionConfig = (0, session_1.readSessionConfig)(sessionId);
+        // Use cached config from SessionStart (prevents hot-reload race)
+        // Fallback to loadConfig() only if session started before config caching was implemented
+        const config = sessionConfig?.cachedConfig || (0, config_1.loadConfig)();
         const jsonlPath = sessionConfig?.jsonlPath ?? null;
         const pressure = (0, context_pressure_1.getContextPressure)(jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard);
         const result = evaluateContextPressure(config, pressure, toolName);

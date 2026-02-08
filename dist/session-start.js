@@ -19,12 +19,14 @@ async function main() {
         const config = (0, config_1.loadConfig)();
         // Write minimal config IMMEDIATELY (failure recovery point)
         // If SessionStart crashes after this, downstream hooks have valid config to read
+        // Cache config here to prevent hot-reload race in downstream hooks
         (0, log_1.ensureStateDir)();
         const minimalConfig = {
             sessionId,
             startedAt: Date.now(),
             injectionMethod: 'detecting',
-            injectionTarget: ''
+            injectionTarget: '',
+            cachedConfig: config // Cache full config to prevent hot-reload
         };
         (0, session_1.writeSessionConfig)(sessionId, minimalConfig);
         // Only exit early when BOTH bookmarks AND contextGuard are disabled.

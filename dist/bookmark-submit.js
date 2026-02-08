@@ -5,6 +5,7 @@ exports.processBookmark = processBookmark;
 const config_1 = require("./lib/config");
 const log_1 = require("./lib/log");
 const stdin_1 = require("./lib/stdin");
+const session_1 = require("./lib/session");
 function processBookmark(userPrompt, marker) {
     const trimmedPrompt = userPrompt.trim();
     // Not the marker — pass through
@@ -36,7 +37,9 @@ async function main() {
         const data = JSON.parse(input);
         const sessionId = data.session_id ?? data.sessionId ?? 'unknown';
         const userPrompt = data.prompt ?? data.user_prompt ?? data.userPrompt ?? '';
-        const config = (0, config_1.loadConfig)();
+        // Use cached config from SessionStart (prevents hot-reload race)
+        const sessionConfig = (0, session_1.readSessionConfig)(sessionId);
+        const config = sessionConfig?.cachedConfig || (0, config_1.loadConfig)();
         const marker = config.bookmarks?.marker ?? '\u00B7';
         const { isBookmark, output } = processBookmark(userPrompt, marker);
         // If bookmark confirmed, append B line to log
