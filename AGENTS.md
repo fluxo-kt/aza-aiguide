@@ -279,6 +279,37 @@ SessionStart writes config incrementally to prevent downstream hook failures if 
 
 If SessionStart crashes after step 1, downstream hooks still have a valid config to read.
 
+## Release Process
+
+**Version lives in 3 files** — ALL must be updated together:
+
+| File | Field |
+|------|-------|
+| `package.json` | `.version` |
+| `.claude-plugin/plugin.json` | `.version` |
+| `.claude-plugin/marketplace.json` | `.plugins[0].version` |
+
+**Use the bump script** — never edit version fields manually:
+
+```bash
+./scripts/bump-version.sh 0.5.0    # Updates all 3 files atomically
+```
+
+**Release checklist**:
+
+1. `./scripts/bump-version.sh X.Y.Z` — bump all version files
+2. Update `CHANGELOG.md` — document what changed
+3. `bun test` — verify all tests pass
+4. `bun run build` — rebuild dist/
+5. `bunx tsc --noEmit` — verify 0 type errors
+6. Commit: `git add -A && git commit -m "release: vX.Y.Z"`
+7. Tag: `git tag vX.Y.Z`
+8. Push: `git push && git push --tags`
+
+**Post-release**: verify marketplace version matches via `claude plugin marketplace info tav@fluxo`.
+
+**CRITICAL**: Never commit version changes without updating ALL 3 files. The bump script makes this structurally impossible — use it.
+
 ## Multi-Session Safety
 
 Each CC session has a unique session ID → unique log file + session config. tmux injection targets the specific `$TMUX_PANE` (e.g. `%3`), not the session. Multiple CC instances in different tmux panes work independently — each targets its own pane, reads its own log, writes its own state. No cross-session interference.

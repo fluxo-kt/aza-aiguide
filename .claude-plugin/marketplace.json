@@ -8,11 +8,16 @@
     {
       "name": "tav",
       "description": "Conversation bookmarks for Claude Code — navigable anchor points in long sessions",
-      "version": "0.1.0",
+      "version": "0.4.0",
       "source": "./",
       "category": "development",
       "homepage": "https://github.com/fluxo-kt/aza-aiguide",
-      "tags": ["bookmarks", "navigation", "long-sessions", "context-management"]
+      "tags": [
+        "bookmarks",
+        "navigation",
+        "long-sessions",
+        "context-management"
+      ]
     }
   ]
 }
