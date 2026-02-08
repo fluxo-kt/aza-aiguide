@@ -12,7 +12,7 @@
 
 /**
  * A single entry in a Claude Code session JSONL file.
- * Covers all known entry types: human, assistant, system, progress,
+ * Covers all known entry types: user, assistant, system, progress,
  * file-history-snapshot, and any future additions via index signature.
  */
 export interface JournalEntry {

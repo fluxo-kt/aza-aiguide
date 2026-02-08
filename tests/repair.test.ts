@@ -45,7 +45,7 @@ function makeEntry(overrides: Partial<JournalEntry>): JournalEntry {
 
 function makeUserEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
   return makeEntry({
-    type: 'human',
+    type: 'user',
     userType: 'external',
     isSidechain: false,
     message: { role: 'user', content: 'hello' },
@@ -76,32 +76,32 @@ describe('repair', () => {
 
   describe('parseJSONL', () => {
     test('parses valid JSONL lines', () => {
-      const content = '{"type":"human","uuid":"a"}\n{"type":"assistant","uuid":"b"}\n'
+      const content = '{"type":"user","uuid":"a"}\n{"type":"assistant","uuid":"b"}\n'
       const result = parseJSONL(content)
       expect(result.length).toBe(2)
-      expect(result[0].entry?.type).toBe('human')
+      expect(result[0].entry?.type).toBe('user')
       expect(result[1].entry?.type).toBe('assistant')
     })
 
     test('handles invalid JSON lines gracefully', () => {
-      const content = '{"type":"human","uuid":"a"}\ninvalid json\n{"type":"assistant","uuid":"b"}\n'
+      const content = '{"type":"user","uuid":"a"}\ninvalid json\n{"type":"assistant","uuid":"b"}\n'
       const result = parseJSONL(content)
       expect(result.length).toBe(3)
-      expect(result[0].entry?.type).toBe('human')
+      expect(result[0].entry?.type).toBe('user')
       expect(result[1].entry).toBeNull()
       expect(result[1].raw).toBe('invalid json')
       expect(result[2].entry?.type).toBe('assistant')
     })
 
     test('skips empty lines', () => {
-      const content = '{"type":"human","uuid":"a"}\n\n\n{"type":"assistant","uuid":"b"}\n'
+      const content = '{"type":"user","uuid":"a"}\n\n\n{"type":"assistant","uuid":"b"}\n'
       const result = parseJSONL(content)
       expect(result.length).toBe(2)
     })
   })
 
   describe('extractMetadata', () => {
-    test('extracts from first human entry', () => {
+    test('extracts from first user entry', () => {
       const entries = [
         { entry: makeEntry({ type: 'assistant' }), raw: '' },
         { entry: makeUserEntry({ sessionId: 'sess-1', version: '2', cwd: '/my/project' }), raw: '' },
@@ -114,7 +114,7 @@ describe('repair', () => {
       expect(meta!.cwd).toBe('/my/project')
     })
 
-    test('returns null when no human entry exists', () => {
+    test('returns null when no user entry exists', () => {
       const entries = [
         { entry: makeEntry({ type: 'assistant' }), raw: '' },
         { entry: makeEntry({ type: 'system' }), raw: '' }
@@ -137,7 +137,7 @@ describe('repair', () => {
     test('returns -1 when none found', () => {
       const entries = [
         { entry: makeEntry({ type: 'assistant' }), raw: '' },
-        { entry: makeEntry({ type: 'human' }), raw: '' }
+        { entry: makeEntry({ type: 'user' }), raw: '' }
       ]
       expect(findLastCompactBoundary(entries)).toBe(-1)
     })
@@ -205,10 +205,10 @@ describe('repair', () => {
   })
 
   describe('createSyntheticEntry', () => {
-    test('creates valid human entry with correct fields', () => {
+    test('creates valid user entry with correct fields', () => {
       const entry = createSyntheticEntry(metadata, 'parent-uuid', '2024-01-15T10:00:00Z', '·')
 
-      expect(entry.type).toBe('human')
+      expect(entry.type).toBe('user')
       expect(entry.uuid).toBeDefined()
       expect(entry.uuid.length).toBeGreaterThan(0)
       expect(entry.parentUuid).toBe('parent-uuid')
@@ -250,7 +250,7 @@ describe('repair', () => {
   describe('validate', () => {
     test('detects duplicate UUIDs', () => {
       const entries = [
-        { entry: makeEntry({ uuid: 'dup', type: 'human' }) },
+        { entry: makeEntry({ uuid: 'dup', type: 'user' }) },
         { entry: makeEntry({ uuid: 'dup', type: 'assistant' }) }
       ]
       const result = validate(entries)
@@ -300,7 +300,7 @@ describe('repair', () => {
 
       // The synthetic entry should be at index 2 (after break at index 1)
       const synthetic = result[2].entry
-      expect(synthetic?.type).toBe('human')
+      expect(synthetic?.type).toBe('user')
       expect(synthetic?.parentUuid).toBe('a1') // anchored to preceding assistant
 
       // The entry after synthetic should have its parentUuid updated

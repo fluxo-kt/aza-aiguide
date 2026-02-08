@@ -90,7 +90,7 @@ function extractMetadata(entries) {
     for (const { entry } of entries) {
         if (!entry)
             continue;
-        if (entry.type === 'human' && entry.sessionId) {
+        if (entry.type === 'user' && entry.sessionId) {
             return {
                 sessionId: entry.sessionId,
                 version: entry.version ?? '1',
@@ -174,7 +174,7 @@ function findLastCompactBoundary(entries) {
  */
 function createSyntheticEntry(metadata, parentUuid, timestamp, marker) {
     return {
-        type: 'human',
+        type: 'user',
         uuid: (0, crypto_1.randomUUID)(),
         parentUuid,
         sessionId: metadata.sessionId,

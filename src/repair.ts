@@ -103,7 +103,7 @@ export function resolveSessionFiles(prefix: string): string[] {
 export function extractMetadata(entries: Array<{ entry: JournalEntry | null }>): SessionMetadata | null {
   for (const { entry } of entries) {
     if (!entry) continue
-    if (entry.type === 'human' && entry.sessionId) {
+    if (entry.type === 'user' && entry.sessionId) {
       return {
         sessionId: entry.sessionId,
         version: entry.version ?? '1',
@@ -206,7 +206,7 @@ export function createSyntheticEntry(
   marker: string
 ): JournalEntry {
   return {
-    type: 'human',
+    type: 'user',
     uuid: randomUUID(),
     parentUuid,
     sessionId: metadata.sessionId,
