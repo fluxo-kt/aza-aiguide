@@ -17,6 +17,12 @@ exports.DEFAULT_CONFIG = {
             cooldownSeconds: 25,
         },
     },
+    contextGuard: {
+        enabled: true,
+        compactThreshold: 30000,
+        compactCooldownSeconds: 120,
+        denyThreshold: 45000,
+    },
 };
 /**
  * Deep merge helper that recursively merges partial config into defaults
@@ -64,6 +70,8 @@ function validateConfig(config) {
     const d = exports.DEFAULT_CONFIG.bookmarks;
     const t = config.bookmarks.thresholds;
     const dt = d.thresholds;
+    const cg = config.contextGuard;
+    const dcg = exports.DEFAULT_CONFIG.contextGuard;
     return {
         bookmarks: {
             enabled: typeof config.bookmarks.enabled === 'boolean'
@@ -79,6 +87,12 @@ function validateConfig(config) {
                 agentBurstThreshold: validNumber(t.agentBurstThreshold, dt.agentBurstThreshold),
                 cooldownSeconds: validNumber(t.cooldownSeconds, dt.cooldownSeconds),
             },
+        },
+        contextGuard: {
+            enabled: typeof cg.enabled === 'boolean' ? cg.enabled : dcg.enabled,
+            compactThreshold: validNumber(cg.compactThreshold, dcg.compactThreshold),
+            compactCooldownSeconds: validNumber(cg.compactCooldownSeconds, dcg.compactCooldownSeconds),
+            denyThreshold: validNumber(cg.denyThreshold, dcg.denyThreshold),
         },
     };
 }

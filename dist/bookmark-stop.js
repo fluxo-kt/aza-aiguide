@@ -87,6 +87,18 @@ async function main() {
                 (0, inject_1.spawnDetached)(command);
             }
         }
+        // Context guard: proactive compaction injection (independent of bookmark)
+        if (config.contextGuard.enabled && injectionMethod !== 'disabled') {
+            const cg = config.contextGuard;
+            if (metrics.cumulativeEstimatedTokens >= cg.compactThreshold) {
+                const compactCooldownMs = cg.compactCooldownSeconds * 1000;
+                const timeSinceCompaction = Date.now() - metrics.lastCompactionAt;
+                if (timeSinceCompaction >= compactCooldownMs) {
+                    const injection = { method: injectionMethod, target: injectionTarget };
+                    (0, inject_1.requestCompaction)(sessionId, injection);
+                }
+            }
+        }
         // Always allow continuation
         console.log(JSON.stringify({ continue: true }));
     }

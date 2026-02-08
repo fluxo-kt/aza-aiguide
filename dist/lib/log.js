@@ -36,9 +36,11 @@ function parseLog(sessionId, stateDir = DEFAULT_STATE_DIR) {
             toolCalls: 0,
             agentReturns: 0,
             estimatedTokens: 0,
+            cumulativeEstimatedTokens: 0,
             elapsedSeconds: 0,
             lastInjectionAt: 0,
             lastBookmarkAt: 0,
+            lastCompactionAt: 0,
             lastLineIsBookmark: false
         };
     }
@@ -58,11 +60,14 @@ function parseLog(sessionId, stateDir = DEFAULT_STATE_DIR) {
     let toolCalls = 0;
     let agentReturns = 0;
     let totalCharCount = 0;
+    let cumulativeCharCount = 0;
     let firstTimestamp = 0;
     let lastTimestamp = 0;
     let lastInjectionAt = 0;
     let lastBookmarkAt = 0;
-    // Parse all lines for lastInjectionAt and lastBookmarkAt
+    let lastCompactionAt = 0;
+    // Parse all lines for global metrics (lastInjectionAt, lastBookmarkAt,
+    // lastCompactionAt, cumulativeEstimatedTokens)
     for (const line of lines) {
         const parts = line.split(' ');
         const type = parts[0];
@@ -74,6 +79,13 @@ function parseLog(sessionId, stateDir = DEFAULT_STATE_DIR) {
         }
         else if (type === 'B') {
             lastBookmarkAt = Math.max(lastBookmarkAt, timestamp);
+        }
+        else if (type === 'C') {
+            lastCompactionAt = Math.max(lastCompactionAt, timestamp);
+        }
+        else if (type === 'T' || type === 'A') {
+            const rawCharCount = parts[2] ? parseInt(parts[2], 10) : 0;
+            cumulativeCharCount += isNaN(rawCharCount) ? 0 : rawCharCount;
         }
     }
     // Parse relevant lines for metrics
@@ -111,9 +123,11 @@ function parseLog(sessionId, stateDir = DEFAULT_STATE_DIR) {
         toolCalls,
         agentReturns,
         estimatedTokens,
+        cumulativeEstimatedTokens: Math.floor(cumulativeCharCount / 4),
         elapsedSeconds,
         lastInjectionAt,
         lastBookmarkAt,
+        lastCompactionAt,
         lastLineIsBookmark
     };
 }

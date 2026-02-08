@@ -8,7 +8,10 @@ exports.checkAccessibilityPermission = checkAccessibilityPermission;
 exports.detectInjectionMethod = detectInjectionMethod;
 exports.buildInjectionCommand = buildInjectionCommand;
 exports.spawnDetached = spawnDetached;
+exports.requestBookmark = requestBookmark;
+exports.requestCompaction = requestCompaction;
 const child_process_1 = require("child_process");
+const log_1 = require("./log");
 /**
  * Validates that a pane ID matches the tmux pane format (%N).
  */
@@ -147,4 +150,36 @@ function spawnDetached(command) {
     catch {
         // Silently ignore errors
     }
+}
+/**
+ * High-level bookmark injection: appends pre-spawn 'I' marker, builds
+ * injection command for the configured marker, and spawns detached.
+ * Returns true if injection was spawned, false if method is disabled.
+ */
+function requestBookmark(sessionId, injection, marker, stateDir) {
+    if (injection.method === 'disabled')
+        return false;
+    (0, log_1.appendEvent)(sessionId, `I ${Date.now()}`, stateDir);
+    const command = buildInjectionCommand(injection.method, injection.target, marker);
+    if (command) {
+        spawnDetached(command);
+        return true;
+    }
+    return false;
+}
+/**
+ * High-level compaction injection: appends pre-spawn 'C' marker, builds
+ * injection command for '/compact', and spawns detached.
+ * Returns true if injection was spawned, false if method is disabled.
+ */
+function requestCompaction(sessionId, injection, stateDir) {
+    if (injection.method === 'disabled')
+        return false;
+    (0, log_1.appendEvent)(sessionId, `C ${Date.now()}`, stateDir);
+    const command = buildInjectionCommand(injection.method, injection.target, '/compact');
+    if (command) {
+        spawnDetached(command);
+        return true;
+    }
+    return false;
 }

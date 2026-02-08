@@ -49,11 +49,29 @@ function handleSubagentStop(sessionId, data, logDir, sessionStateDir, configPath
     const charCount = measureSize(data.output ?? data.result ?? data.response ?? data.agent_output);
     (0, log_1.appendEvent)(sessionId, `A ${Date.now()} ${charCount}`, logDir);
     const config = (0, config_1.loadConfig)(configPath);
+    const metrics = (0, log_1.parseLog)(sessionId, logDir);
+    // Context guard: proactive compaction injection (independent of bookmark)
+    if (config.contextGuard.enabled) {
+        const cg = config.contextGuard;
+        if (metrics.cumulativeEstimatedTokens >= cg.compactThreshold) {
+            const compactCooldownMs = cg.compactCooldownSeconds * 1000;
+            const timeSinceCompaction = Date.now() - metrics.lastCompactionAt;
+            if (timeSinceCompaction >= compactCooldownMs) {
+                const sessionConfig = getSessionConfig(sessionId, sessionStateDir);
+                if (sessionConfig && sessionConfig.injectionMethod !== 'disabled') {
+                    const injection = {
+                        method: sessionConfig.injectionMethod,
+                        target: sessionConfig.injectionTarget
+                    };
+                    (0, inject_1.requestCompaction)(sessionId, injection, logDir);
+                }
+            }
+        }
+    }
     // Guard: bookmarks disabled globally (mirrors evaluateBookmark Guard 1)
     if (!config.bookmarks.enabled) {
         return false;
     }
-    const metrics = (0, log_1.parseLog)(sessionId, logDir);
     const thresholds = config.bookmarks.thresholds;
     // Evaluate ALL thresholds — SubagentStop may be the only hook that fires
     // during long continuous turns where the Stop hook rarely triggers.
