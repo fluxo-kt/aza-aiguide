@@ -94,7 +94,9 @@ function extractMetadata(entries) {
             return {
                 sessionId: entry.sessionId,
                 version: entry.version ?? '1',
-                cwd: entry.cwd ?? ''
+                cwd: entry.cwd ?? '',
+                gitBranch: entry.gitBranch,
+                slug: entry.slug
             };
         }
     }
@@ -173,21 +175,27 @@ function findLastCompactBoundary(entries) {
  * rewind point. Mirrors the structure of real user entries.
  */
 function createSyntheticEntry(metadata, parentUuid, timestamp, marker) {
-    return {
-        type: 'user',
-        uuid: (0, crypto_1.randomUUID)(),
+    const entry = {
         parentUuid,
+        isSidechain: false,
+        userType: 'external',
+        cwd: metadata.cwd,
         sessionId: metadata.sessionId,
         version: metadata.version,
-        cwd: metadata.cwd,
+        type: 'user',
         message: {
             role: 'user',
             content: marker
         },
-        timestamp,
-        isSidechain: false,
-        userType: 'external'
+        uuid: (0, crypto_1.randomUUID)(),
+        timestamp
     };
+    // Include optional fields that real CC entries have (required for rewind point recognition)
+    if (metadata.gitBranch)
+        entry.gitBranch = metadata.gitBranch;
+    if (metadata.slug)
+        entry.slug = metadata.slug;
+    return entry;
 }
 /**
  * Computes a timestamp midpoint between two ISO timestamps.

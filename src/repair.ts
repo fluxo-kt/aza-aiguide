@@ -17,6 +17,8 @@ export interface SessionMetadata {
   sessionId: string
   version: string
   cwd: string
+  gitBranch?: string
+  slug?: string
 }
 
 export interface RepairOptions {
@@ -107,7 +109,9 @@ export function extractMetadata(entries: Array<{ entry: JournalEntry | null }>):
       return {
         sessionId: entry.sessionId,
         version: entry.version ?? '1',
-        cwd: entry.cwd ?? ''
+        cwd: entry.cwd ?? '',
+        gitBranch: (entry as Record<string, unknown>).gitBranch as string | undefined,
+        slug: (entry as Record<string, unknown>).slug as string | undefined
       }
     }
   }
@@ -205,21 +209,25 @@ export function createSyntheticEntry(
   timestamp: string,
   marker: string
 ): JournalEntry {
-  return {
-    type: 'user',
-    uuid: randomUUID(),
+  const entry: JournalEntry = {
     parentUuid,
+    isSidechain: false,
+    userType: 'external',
+    cwd: metadata.cwd,
     sessionId: metadata.sessionId,
     version: metadata.version,
-    cwd: metadata.cwd,
+    type: 'user',
     message: {
       role: 'user',
       content: marker
     },
-    timestamp,
-    isSidechain: false,
-    userType: 'external'
+    uuid: randomUUID(),
+    timestamp
   }
+  // Include optional fields that real CC entries have (required for rewind point recognition)
+  if (metadata.gitBranch) entry.gitBranch = metadata.gitBranch
+  if (metadata.slug) entry.slug = metadata.slug
+  return entry
 }
 
 /**
