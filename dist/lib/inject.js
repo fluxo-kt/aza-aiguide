@@ -195,7 +195,11 @@ function spawnDetached(command) {
  * injection command for the configured marker, and spawns detached.
  * Returns true if injection was spawned, false if method is disabled.
  */
-function requestBookmark(sessionId, injection, marker, stateDir) {
+function requestBookmark(sessionId, injection, marker, declaredLocation, config, stateDir) {
+    // Verify location before injection
+    if (!verifyLocation(declaredLocation, config)) {
+        return false; // Location mismatch, skip injection
+    }
     if (injection.method === 'disabled')
         return false;
     const command = buildInjectionCommand(injection.method, injection.target, marker);
@@ -210,7 +214,11 @@ function requestBookmark(sessionId, injection, marker, stateDir) {
  * injection command for '/compact', and spawns detached.
  * Returns true if injection was spawned, false if method is disabled.
  */
-function requestCompaction(sessionId, injection, stateDir) {
+function requestCompaction(sessionId, injection, declaredLocation, config, stateDir) {
+    // Verify location before injection
+    if (!verifyLocation(declaredLocation, config)) {
+        return false; // Location mismatch, skip injection
+    }
     if (injection.method === 'disabled')
         return false;
     const command = buildInjectionCommand(injection.method, injection.target, '/compact');

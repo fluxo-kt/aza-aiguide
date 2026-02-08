@@ -16,6 +16,7 @@ import {
 } from '../src/lib/inject'
 import type { InjectionConfig } from '../src/lib/inject'
 import { getLogPath } from '../src/lib/log'
+import type { TavConfig } from '../src/lib/config'
 
 describe('inject utilities', () => {
   // Store original env values
@@ -314,6 +315,19 @@ describe('inject utilities', () => {
 
   describe('requestBookmark', () => {
     let tempDir: string
+    const mockConfig: TavConfig = {
+      bookmarks: {
+        enabled: true,
+        marker: '·',
+        thresholds: { minTokens: 6000, minToolCalls: 15, minSeconds: 120, agentBurstThreshold: 3, cooldownSeconds: 25 }
+      },
+      contextGuard: { enabled: true, contextWindowTokens: 200000, compactPercent: 0.76, denyPercent: 0.85, compactCooldownSeconds: 120, responseRatio: 0.25 },
+      sessionLocation: {
+        enabled: false,
+        verifyTab: false,
+        terminals: { iterm2: { tabVerification: false }, terminal: { tabVerification: false } }
+      }
+    }
 
     beforeEach(() => {
       tempDir = join(tmpdir(), `tav-inject-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
@@ -328,13 +342,13 @@ describe('inject utilities', () => {
 
     test('returns false when injection method is disabled', () => {
       const injection: InjectionConfig = { method: 'disabled', target: '' }
-      const result = requestBookmark('test-session', injection, '·', tempDir)
+      const result = requestBookmark('test-session', injection, '·', undefined, mockConfig, tempDir)
       expect(result).toBe(false)
     })
 
     test('appends I event to log and returns true for tmux', () => {
       const injection: InjectionConfig = { method: 'tmux', target: '%99' }
-      const result = requestBookmark('test-session', injection, '·', tempDir)
+      const result = requestBookmark('test-session', injection, '·', undefined, mockConfig, tempDir)
       expect(result).toBe(true)
 
       const logContent = readFileSync(getLogPath('test-session', tempDir), 'utf-8')
@@ -343,7 +357,7 @@ describe('inject utilities', () => {
 
     test('does not write log when disabled', () => {
       const injection: InjectionConfig = { method: 'disabled', target: '' }
-      requestBookmark('test-session', injection, '·', tempDir)
+      requestBookmark('test-session', injection, '·', undefined, mockConfig, tempDir)
 
       const logPath = getLogPath('test-session', tempDir)
       expect(existsSync(logPath)).toBe(false)
@@ -352,6 +366,19 @@ describe('inject utilities', () => {
 
   describe('requestCompaction', () => {
     let tempDir: string
+    const mockConfig: TavConfig = {
+      bookmarks: {
+        enabled: true,
+        marker: '·',
+        thresholds: { minTokens: 6000, minToolCalls: 15, minSeconds: 120, agentBurstThreshold: 3, cooldownSeconds: 25 }
+      },
+      contextGuard: { enabled: true, contextWindowTokens: 200000, compactPercent: 0.76, denyPercent: 0.85, compactCooldownSeconds: 120, responseRatio: 0.25 },
+      sessionLocation: {
+        enabled: false,
+        verifyTab: false,
+        terminals: { iterm2: { tabVerification: false }, terminal: { tabVerification: false } }
+      }
+    }
 
     beforeEach(() => {
       tempDir = join(tmpdir(), `tav-inject-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
@@ -366,13 +393,13 @@ describe('inject utilities', () => {
 
     test('returns false when injection method is disabled', () => {
       const injection: InjectionConfig = { method: 'disabled', target: '' }
-      const result = requestCompaction('test-session', injection, tempDir)
+      const result = requestCompaction('test-session', injection, undefined, mockConfig, tempDir)
       expect(result).toBe(false)
     })
 
     test('appends C event to log and returns true for tmux', () => {
       const injection: InjectionConfig = { method: 'tmux', target: '%99' }
-      const result = requestCompaction('test-session', injection, tempDir)
+      const result = requestCompaction('test-session', injection, undefined, mockConfig, tempDir)
       expect(result).toBe(true)
 
       const logContent = readFileSync(getLogPath('test-session', tempDir), 'utf-8')
@@ -381,7 +408,7 @@ describe('inject utilities', () => {
 
     test('does not write log when disabled', () => {
       const injection: InjectionConfig = { method: 'disabled', target: '' }
-      requestCompaction('test-session', injection, tempDir)
+      requestCompaction('test-session', injection, undefined, mockConfig, tempDir)
 
       const logPath = getLogPath('test-session', tempDir)
       expect(existsSync(logPath)).toBe(false)

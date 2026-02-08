@@ -50,18 +50,14 @@ async function main() {
         const injectionMethod = (sessionConfig.injectionMethod || 'disabled');
         const injectionTarget = sessionConfig.injectionTarget || '';
         const jsonlPath = sessionConfig.jsonlPath ?? null;
+        const declaredLocation = sessionConfig.location;
         // Parse log metrics
         const metrics = (0, log_1.parseLog)(sessionId);
         // Evaluate whether to inject bookmark
         const evaluation = evaluateBookmark(data, config, metrics, injectionMethod);
         if (evaluation.shouldInject) {
-            // Append pre-spawn marker to log
-            (0, log_1.appendEvent)(sessionId, `I ${Date.now()}`);
-            // Build and spawn injection command
-            const command = (0, inject_1.buildInjectionCommand)(injectionMethod, injectionTarget, config.bookmarks.marker);
-            if (command) {
-                (0, inject_1.spawnDetached)(command);
-            }
+            const injection = { method: injectionMethod, target: injectionTarget };
+            (0, inject_1.requestBookmark)(sessionId, injection, config.bookmarks.marker, declaredLocation, config);
         }
         // Context guard: proactive compaction injection (independent of bookmark)
         const pressure = (0, context_pressure_1.getContextPressure)(jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard);
@@ -73,7 +69,7 @@ async function main() {
         });
         if (compactEval.shouldCompact) {
             const injection = { method: injectionMethod, target: injectionTarget };
-            (0, inject_1.requestCompaction)(sessionId, injection);
+            (0, inject_1.requestCompaction)(sessionId, injection, declaredLocation, config);
         }
         // Always allow continuation
         console.log(JSON.stringify({ continue: true }));

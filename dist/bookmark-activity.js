@@ -40,6 +40,7 @@ function handleSubagentStop(sessionId, data, logDir, sessionStateDir, configPath
     const injectionMethod = sessionConfig?.injectionMethod ?? 'disabled';
     const injectionTarget = sessionConfig?.injectionTarget ?? '';
     const jsonlPath = sessionConfig?.jsonlPath ?? null;
+    const declaredLocation = sessionConfig?.location;
     // Context guard: proactive compaction injection (independent of bookmark)
     const pressure = (0, context_pressure_1.getContextPressure)(jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard);
     // Burst detection: 5+ agent returns in 10 seconds AND pressure > compactPercent
@@ -62,17 +63,16 @@ function handleSubagentStop(sessionId, data, logDir, sessionStateDir, configPath
             method: injectionMethod,
             target: injectionTarget
         };
-        (0, inject_1.requestCompaction)(sessionId, injection, logDir);
+        (0, inject_1.requestCompaction)(sessionId, injection, declaredLocation, config, logDir);
     }
     // Unified bookmark evaluation — same guard ordering as Stop hook
     const evaluation = (0, evaluate_1.shouldInjectBookmark)({ config, metrics, injectionMethod });
     if (evaluation.shouldInject) {
-        (0, log_1.appendEvent)(sessionId, `I ${Date.now()}`, logDir);
-        const command = (0, inject_1.buildInjectionCommand)(injectionMethod, injectionTarget, config.bookmarks.marker);
-        if (command) {
-            (0, inject_1.spawnDetached)(command);
-            return true;
-        }
+        const injection = {
+            method: injectionMethod,
+            target: injectionTarget
+        };
+        return (0, inject_1.requestBookmark)(sessionId, injection, config.bookmarks.marker, declaredLocation, config, logDir);
     }
     return false;
 }

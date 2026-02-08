@@ -227,8 +227,15 @@ export function requestBookmark(
   sessionId: string,
   injection: InjectionConfig,
   marker: string,
+  declaredLocation: SessionLocation | undefined,
+  config: TavConfig,
   stateDir?: string
 ): boolean {
+  // Verify location before injection
+  if (!verifyLocation(declaredLocation, config)) {
+    return false  // Location mismatch, skip injection
+  }
+
   if (injection.method === 'disabled') return false
 
   const command = buildInjectionCommand(injection.method, injection.target, marker)
@@ -247,8 +254,15 @@ export function requestBookmark(
 export function requestCompaction(
   sessionId: string,
   injection: InjectionConfig,
+  declaredLocation: SessionLocation | undefined,
+  config: TavConfig,
   stateDir?: string
 ): boolean {
+  // Verify location before injection
+  if (!verifyLocation(declaredLocation, config)) {
+    return false  // Location mismatch, skip injection
+  }
+
   if (injection.method === 'disabled') return false
 
   const command = buildInjectionCommand(injection.method, injection.target, '/compact')

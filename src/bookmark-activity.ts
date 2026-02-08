@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { loadConfig } from './lib/config'
 import { appendEvent, parseLog } from './lib/log'
-import { buildInjectionCommand, spawnDetached, requestCompaction } from './lib/inject'
+import { buildInjectionCommand, spawnDetached, requestBookmark, requestCompaction } from './lib/inject'
 import type { InjectionMethod, InjectionConfig } from './lib/inject'
 import { readStdin } from './lib/stdin'
 import { readSessionConfig } from './lib/session'
@@ -53,6 +53,7 @@ export function handleSubagentStop(sessionId: string, data: Record<string, unkno
   const injectionMethod = sessionConfig?.injectionMethod ?? 'disabled'
   const injectionTarget = sessionConfig?.injectionTarget ?? ''
   const jsonlPath = sessionConfig?.jsonlPath ?? null
+  const declaredLocation = sessionConfig?.location
 
   // Context guard: proactive compaction injection (independent of bookmark)
   const pressure = getContextPressure(jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard)
@@ -79,20 +80,18 @@ export function handleSubagentStop(sessionId: string, data: Record<string, unkno
       method: injectionMethod as InjectionMethod,
       target: injectionTarget
     }
-    requestCompaction(sessionId, injection, logDir)
+    requestCompaction(sessionId, injection, declaredLocation, config, logDir)
   }
 
   // Unified bookmark evaluation — same guard ordering as Stop hook
   const evaluation = shouldInjectBookmark({ config, metrics, injectionMethod })
 
   if (evaluation.shouldInject) {
-    appendEvent(sessionId, `I ${Date.now()}`, logDir)
-
-    const command = buildInjectionCommand(injectionMethod as InjectionMethod, injectionTarget, config.bookmarks.marker)
-    if (command) {
-      spawnDetached(command)
-      return true
+    const injection: InjectionConfig = {
+      method: injectionMethod as InjectionMethod,
+      target: injectionTarget
     }
+    return requestBookmark(sessionId, injection, config.bookmarks.marker, declaredLocation, config, logDir)
   }
 
   return false

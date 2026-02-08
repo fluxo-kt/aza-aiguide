@@ -3,7 +3,7 @@ import { loadConfig } from './lib/config'
 import type { TavConfig } from './lib/config'
 import { parseLog, appendEvent } from './lib/log'
 import type { LogMetrics } from './lib/log'
-import { buildInjectionCommand, spawnDetached, requestCompaction } from './lib/inject'
+import { buildInjectionCommand, spawnDetached, requestBookmark, requestCompaction } from './lib/inject'
 import type { InjectionMethod, InjectionConfig } from './lib/inject'
 import { isContextLimitStop, isUserAbort } from './lib/guards'
 import { readStdin } from './lib/stdin'
@@ -64,6 +64,7 @@ async function main(): Promise<void> {
     const injectionMethod = (sessionConfig.injectionMethod || 'disabled') as InjectionMethod
     const injectionTarget = sessionConfig.injectionTarget || ''
     const jsonlPath = sessionConfig.jsonlPath ?? null
+    const declaredLocation = sessionConfig.location
 
     // Parse log metrics
     const metrics = parseLog(sessionId)
@@ -72,19 +73,8 @@ async function main(): Promise<void> {
     const evaluation = evaluateBookmark(data, config, metrics, injectionMethod)
 
     if (evaluation.shouldInject) {
-      // Append pre-spawn marker to log
-      appendEvent(sessionId, `I ${Date.now()}`)
-
-      // Build and spawn injection command
-      const command = buildInjectionCommand(
-        injectionMethod,
-        injectionTarget,
-        config.bookmarks.marker
-      )
-
-      if (command) {
-        spawnDetached(command)
-      }
+      const injection: InjectionConfig = { method: injectionMethod, target: injectionTarget }
+      requestBookmark(sessionId, injection, config.bookmarks.marker, declaredLocation, config)
     }
 
     // Context guard: proactive compaction injection (independent of bookmark)
@@ -99,7 +89,7 @@ async function main(): Promise<void> {
 
     if (compactEval.shouldCompact) {
       const injection: InjectionConfig = { method: injectionMethod, target: injectionTarget }
-      requestCompaction(sessionId, injection)
+      requestCompaction(sessionId, injection, declaredLocation, config)
     }
 
     // Always allow continuation
