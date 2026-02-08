@@ -117,7 +117,7 @@ Detected once at SessionStart, stored in `~/.claude/tav/state/{id}.json`:
 
 1. **tmux** (`$TMUX` + `$TMUX_PANE`) — primary. Per-pane targeting, works regardless of foreground app
 2. **GNU Screen** (`$STY`) — `screen -X stuff`
-3. **osascript** (macOS) — only when terminal process is identifiable via `$TERM_PROGRAM`. Uses process-targeted AppleScript (`tell process "X"`) to prevent keystrokes landing in wrong apps. Supported: Terminal.app, iTerm2, Warp, VS Code, Ghostty, kitty, Alacritty, Hyper. Needs Accessibility permissions
+3. **osascript** (macOS) — only when terminal process is identifiable via `$TERM_PROGRAM`. Uses process-targeted AppleScript (`tell process "X"`) with **frontmost application check** to prevent keystrokes landing in wrong apps. Injection only occurs if terminal is the active foreground application. Supported: Terminal.app, iTerm2, Warp, VS Code, Ghostty, kitty, Alacritty, Hyper. Needs Accessibility permissions
 4. **disabled** — graceful degradation, no errors. Also used when macOS terminal is unrecognised (safety over convenience)
 
 ## Context Pressure System

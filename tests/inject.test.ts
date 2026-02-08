@@ -268,6 +268,18 @@ describe('inject utilities', () => {
       expect(command).toContain('marker');
     });
 
+    test('osascript command includes frontmost application check', () => {
+      const command = buildInjectionCommand('osascript', 'Warp', '·');
+      expect(command).not.toBeNull();
+      // Verify frontmost check is present
+      expect(command).toContain('name of first application process whose frontmost is true');
+      expect(command).toContain('is "Warp"');
+      // Verify conditional structure (if check passes, then inject)
+      expect(command).toContain('if osascript');
+      expect(command).toContain('then osascript');
+      expect(command).toContain('; fi');
+    });
+
     test('returns null for disabled', () => {
       const command = buildInjectionCommand('disabled', '', '📖');
       expect(command).toBeNull();

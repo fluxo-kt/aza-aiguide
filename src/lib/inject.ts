@@ -138,14 +138,20 @@ export function buildInjectionCommand(
 
     case 'osascript': {
       // macOS keystroke automation — split into separate keystroke + Enter for reliability.
-      // Process-targeted injection prevents keystrokes landing in the wrong app.
+      // CRITICAL: Frontmost application check prevents keystrokes landing in the wrong app.
       // Double sanitisation: AppleScript first (escape " and \), then shell (escape ')
       // to prevent both AppleScript injection and shell single-quote breakout.
       if (!target) return null  // Defence-in-depth: never send blind keystrokes
       const asTarget = sanitizeForShell(sanitizeForAppleScript(target))
       const asMarker = sanitizeForShell(sanitizeForAppleScript(marker))
+
+      // Frontmost check: only inject if terminal is the active application
+      // This prevents keystrokes landing in browser/IDE when user switches windows
+      const frontmostCheck = `tell application "System Events" to (name of first application process whose frontmost is true) is "${asTarget}"`
       const tellTarget = `tell application "System Events" to tell process "${asTarget}"`
-      return `sleep 1.5 && osascript -e '${tellTarget} to keystroke "${asMarker}"' && sleep 0.2 && osascript -e '${tellTarget} to key code 36'`
+
+      // Command structure: check frontmost → keystroke → Enter (only if check passes)
+      return `sleep 1.5 && if osascript -e '${frontmostCheck}' >/dev/null 2>&1; then osascript -e '${tellTarget} to keystroke "${asMarker}"' && sleep 0.2 && osascript -e '${tellTarget} to key code 36'; fi`
     }
 
     default:
