@@ -34,12 +34,10 @@ function sanitizeForAppleScript(text) {
 }
 /**
  * Resolves the macOS process name for the current terminal emulator.
- * Used for targeted AppleScript keystroke injection.
+ * Used for process-targeted AppleScript keystroke injection.
  *
- * Returns empty string for unrecognised terminals — the caller falls back
- * to a generic System Events keystroke which still works in most cases.
- * If injection fails entirely (IDE terminals, missing Accessibility),
- * the user can always type · manually.
+ * Returns empty string for unrecognised terminals — detectInjectionMethod
+ * will disable osascript to prevent keystrokes landing in the wrong app.
  */
 function resolveTerminalProcessName() {
     const termProgram = process.env.TERM_PROGRAM || '';
@@ -87,10 +85,14 @@ function detectInjectionMethod() {
     if (screenSession) {
         return { method: 'screen', target: screenSession };
     }
-    // Check for macOS — store the terminal process name in target for
-    // AppleScript process-targeted injection (critical for Warp Terminal)
+    // Check for macOS — only use osascript when we can identify the terminal process.
+    // Without process-targeted injection, keystrokes go to the frontmost app which
+    // can land in the wrong application (browser, editor) when the user switches focus.
     if (process.platform === 'darwin') {
-        return { method: 'osascript', target: resolveTerminalProcessName() };
+        const terminalProcess = resolveTerminalProcessName();
+        if (terminalProcess) {
+            return { method: 'osascript', target: terminalProcess };
+        }
     }
     // No method available
     return { method: 'disabled', target: '' };
@@ -120,15 +122,14 @@ function buildInjectionCommand(method, target, marker) {
             return `sleep 1.5 && screen -S '${sanitizedTarget}' -X stuff '${sanitizedMarker}\\n'`;
         case 'osascript': {
             // macOS keystroke automation — split into separate keystroke + Enter for reliability.
-            // When target is set (e.g. "Warp", "iTerm2"), use process-targeted injection
-            // which is critical for terminals with custom input editors like Warp Terminal.
+            // Process-targeted injection prevents keystrokes landing in the wrong app.
             // Double sanitisation: AppleScript first (escape " and \), then shell (escape ')
             // to prevent both AppleScript injection and shell single-quote breakout.
+            if (!target)
+                return null; // Defence-in-depth: never send blind keystrokes
             const asTarget = sanitizeForShell(sanitizeForAppleScript(target));
             const asMarker = sanitizeForShell(sanitizeForAppleScript(marker));
-            const tellTarget = asTarget
-                ? `tell application "System Events" to tell process "${asTarget}"`
-                : 'tell application "System Events"';
+            const tellTarget = `tell application "System Events" to tell process "${asTarget}"`;
             return `sleep 1.5 && osascript -e '${tellTarget} to keystroke "${asMarker}"' && sleep 0.2 && osascript -e '${tellTarget} to key code 36'`;
         }
         default:

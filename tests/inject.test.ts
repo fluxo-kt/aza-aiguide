@@ -118,19 +118,15 @@ describe('inject utilities', () => {
       }
     });
 
-    test('returns osascript with empty target for unknown terminal', () => {
+    test('returns disabled for unknown terminal (prevents keystrokes to wrong app)', () => {
       delete process.env.TMUX;
       delete process.env.TMUX_PANE;
       delete process.env.STY;
       delete process.env.TERM_PROGRAM;
 
       const result = detectInjectionMethod();
-      if (process.platform === 'darwin') {
-        expect(result.method).toBe('osascript');
-        expect(result.target).toBe('');
-      } else {
-        expect(result.method).toBe('disabled');
-      }
+      // Unknown terminal → disabled on all platforms (macOS can't safely target)
+      expect(result.method).toBe('disabled');
     });
 
     test('returns disabled when nothing available', () => {
@@ -248,15 +244,9 @@ describe('inject utilities', () => {
       expect(command).toContain('\\n');
     });
 
-    test('returns osascript command with generic targeting', () => {
+    test('returns null for osascript with empty target (prevents blind keystrokes)', () => {
       const command = buildInjectionCommand('osascript', '', '📖');
-      expect(command).not.toBeNull();
-      expect(command).toContain('osascript');
-      expect(command).toContain('tell application "System Events"');
-      expect(command).toContain('keystroke');
-      expect(command).toContain('📖');
-      // Separate keystroke and Enter commands
-      expect(command).toContain('key code 36');
+      expect(command).toBeNull();
     });
 
     test('returns osascript command with process-targeted injection', () => {
@@ -290,7 +280,8 @@ describe('inject utilities', () => {
       const screenCmd = buildInjectionCommand('screen', '12345', '📖');
       expect(screenCmd).toContain('sleep 1.5');
 
-      const osascriptCmd = buildInjectionCommand('osascript', '', '📖');
+      // osascript requires a process target; verify with a real target
+      const osascriptCmd = buildInjectionCommand('osascript', 'Terminal', '📖');
       expect(osascriptCmd).toContain('sleep 1.5');
     });
   });

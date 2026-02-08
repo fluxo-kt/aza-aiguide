@@ -44,8 +44,9 @@ function handleSubagentStop(sessionId, data, logDir, sessionStateDir, configPath
     const pressure = (0, context_pressure_1.getContextPressure)(jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard);
     // Burst detection: 5+ agent returns in 10 seconds AND pressure > 60%
     // During agent cascades the Stop hook never fires — SubagentStop is the only checkpoint
+    // Must still respect contextGuard.enabled — user's explicit choice to disable guard
     const recentBurst = metrics.recentAgentTimestamps.filter(t => Date.now() - t < 10000).length >= 5;
-    const burstCompact = recentBurst && pressure > 0.60;
+    const burstCompact = recentBurst && pressure > 0.60 && config.contextGuard.enabled;
     const compactEval = (0, evaluate_1.shouldCompact)({
         pressure,
         config: config.contextGuard,
