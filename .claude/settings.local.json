@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun install:*)",
+      "WebFetch(domain:deepwiki.com)",
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:kentgigger.com)",
+      "WebFetch(domain:liambx.com)",
+      "WebFetch(domain:quemy.info)",
+      "WebFetch(domain:sw.kovidgoyal.net)",
+      "WebFetch(domain:www.gnu.org)",
+      "mcp__duckduckgo__search"
+    ]
+  }
+}
