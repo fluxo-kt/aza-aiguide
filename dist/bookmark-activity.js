@@ -39,20 +39,24 @@ function handleSubagentStop(sessionId, data, logDir, sessionStateDir, configPath
     // Use cached config from SessionStart (prevents hot-reload race)
     // Fallback to loadConfig() only if session started before config caching was implemented
     const config = sessionConfig?.cachedConfig || (0, config_1.loadConfig)(configPath);
-    const injectionMethod = sessionConfig?.injectionMethod ?? 'disabled';
+    // Map 'detecting' (interim SessionStart state) to 'disabled' — don't inject during setup
+    const injectionMethod = (sessionConfig?.injectionMethod ?? 'disabled') === 'detecting'
+        ? 'disabled' : (sessionConfig?.injectionMethod ?? 'disabled');
     const injectionTarget = sessionConfig?.injectionTarget ?? '';
     const jsonlPath = sessionConfig?.jsonlPath ?? null;
     const declaredLocation = sessionConfig?.location;
     // Context guard: proactive compaction injection (independent of bookmark)
     const pressure = (0, context_pressure_1.getContextPressure)(jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard);
-    // Burst detection: 5+ agent returns in 10 seconds AND pressure > compactPercent
-    // During agent cascades the Stop hook never fires — SubagentStop is the only checkpoint
-    // Must respect: contextGuard.enabled (user's choice), injection method (can't inject when
-    // disabled), and compaction cooldown (prevents /compact spam during rapid agent returns)
+    // Burst detection: 5+ agent returns in 10 seconds with elevated pressure.
+    // During agent cascades the Stop hook never fires — SubagentStop is the only checkpoint.
+    // Burst uses a LOWER threshold (compactPercent × 0.8 ≈ 60% at default 76%) to trigger
+    // emergency compaction before normal thresholds, giving early warning during rapid cascades.
+    // Must respect: contextGuard.enabled, injection method, and compaction cooldown.
+    const burstCompactPercent = config.contextGuard.compactPercent * 0.8;
     const recentBurst = metrics.recentAgentTimestamps.filter(t => Date.now() - t < 10000).length >= 5;
     const compactCooldownMs = config.contextGuard.compactCooldownSeconds * 1000;
     const withinCompactCooldown = (Date.now() - metrics.lastCompactionAt) < compactCooldownMs;
-    const burstCompact = recentBurst && pressure > config.contextGuard.compactPercent && config.contextGuard.enabled
+    const burstCompact = recentBurst && pressure > burstCompactPercent && config.contextGuard.enabled
         && injectionMethod !== 'disabled' && !withinCompactCooldown;
     const compactEval = (0, evaluate_1.shouldCompact)({
         pressure,

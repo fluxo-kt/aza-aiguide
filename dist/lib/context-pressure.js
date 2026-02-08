@@ -148,21 +148,31 @@ function resolveJsonlPath(sessionId, homeOverride) {
     try {
         const dirs = (0, fs_1.readdirSync)(projectsDir);
         const targetFile = `${sessionId}.jsonl`;
+        // Collect all matches and return the most recent by mtime.
+        // Multiple matches can occur when project hash directories contain
+        // the same session ID (rare but possible with hash collisions).
+        let bestPath = null;
+        let bestMtime = 0;
         for (const dir of dirs) {
             const dirPath = (0, path_1.join)(projectsDir, dir);
             try {
-                const stat = (0, fs_1.statSync)(dirPath);
-                if (!stat.isDirectory())
+                const dirStat = (0, fs_1.statSync)(dirPath);
+                if (!dirStat.isDirectory())
                     continue;
                 const candidate = (0, path_1.join)(dirPath, targetFile);
                 if ((0, fs_1.existsSync)(candidate)) {
-                    return candidate;
+                    const candidateStat = (0, fs_1.statSync)(candidate);
+                    if (candidateStat.mtimeMs > bestMtime) {
+                        bestMtime = candidateStat.mtimeMs;
+                        bestPath = candidate;
+                    }
                 }
             }
             catch {
                 // Skip unreadable directories
             }
         }
+        return bestPath;
     }
     catch {
         // Projects dir unreadable

@@ -49,7 +49,9 @@ async function main() {
         // Use cached config from SessionStart (prevents hot-reload race)
         // Fallback to loadConfig() only if session started before config caching was implemented
         const config = sessionConfig.cachedConfig || (0, config_1.loadConfig)();
-        const injectionMethod = (sessionConfig.injectionMethod || 'disabled');
+        // Map 'detecting' (interim SessionStart state) to 'disabled' — don't inject during setup
+        const injectionMethod = sessionConfig.injectionMethod === 'detecting'
+            ? 'disabled' : (sessionConfig.injectionMethod || 'disabled');
         const injectionTarget = sessionConfig.injectionTarget || '';
         const jsonlPath = sessionConfig.jsonlPath ?? null;
         const declaredLocation = sessionConfig.location;

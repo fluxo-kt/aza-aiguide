@@ -64,7 +64,9 @@ async function main(): Promise<void> {
     // Fallback to loadConfig() only if session started before config caching was implemented
     const config = sessionConfig.cachedConfig || loadConfig()
 
-    const injectionMethod = (sessionConfig.injectionMethod || 'disabled') as InjectionMethod
+    // Map 'detecting' (interim SessionStart state) to 'disabled' — don't inject during setup
+    const injectionMethod: InjectionMethod = sessionConfig.injectionMethod === 'detecting'
+      ? 'disabled' : (sessionConfig.injectionMethod || 'disabled')
     const injectionTarget = sessionConfig.injectionTarget || ''
     const jsonlPath = sessionConfig.jsonlPath ?? null
     const declaredLocation = sessionConfig.location

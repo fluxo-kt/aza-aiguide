@@ -4,6 +4,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { sanitizeSessionId, ensureStateDir } from './log'
 import type { TavConfig } from './config'
+import type { InjectionMethod } from './inject'
 
 /**
  * Terminal location snapshot captured at session start.
@@ -24,7 +25,7 @@ export interface SessionLocation {
  */
 export interface SessionConfig {
   sessionId: string
-  injectionMethod: string
+  injectionMethod: InjectionMethod | 'detecting'
   injectionTarget: string
   startedAt: number
   jsonlPath?: string           // cached JSONL path for context pressure reading (resolved at SessionStart)
