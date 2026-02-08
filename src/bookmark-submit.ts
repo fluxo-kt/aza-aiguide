@@ -3,6 +3,7 @@
 import { loadConfig } from './lib/config'
 import { appendEvent } from './lib/log'
 import { readStdin } from './lib/stdin'
+import { readSessionConfig } from './lib/session'
 
 interface StdinData {
   hook_event_name?: string
@@ -62,7 +63,9 @@ async function main(): Promise<void> {
     const sessionId = data.session_id ?? data.sessionId ?? 'unknown'
     const userPrompt = data.prompt ?? data.user_prompt ?? data.userPrompt ?? ''
 
-    const config = loadConfig()
+    // Use cached config from SessionStart (prevents hot-reload race)
+    const sessionConfig = readSessionConfig(sessionId)
+    const config = sessionConfig?.cachedConfig || loadConfig()
     const marker = config.bookmarks?.marker ?? '\u00B7'
 
     const { isBookmark, output } = processBookmark(userPrompt, marker)

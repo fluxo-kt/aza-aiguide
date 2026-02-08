@@ -79,11 +79,14 @@ async function main(): Promise<void> {
       return
     }
 
-    const config = loadConfig()
     const metrics = parseLog(sessionId)
 
-    // Read cached JSONL path from session config for real token pressure
+    // Read session config ONCE — provides cached config and JSONL path
     const sessionConfig = readSessionConfig(sessionId)
+
+    // Use cached config from SessionStart (prevents hot-reload race)
+    // Fallback to loadConfig() only if session started before config caching was implemented
+    const config = sessionConfig?.cachedConfig || loadConfig()
     const jsonlPath = sessionConfig?.jsonlPath ?? null
 
     const pressure = getContextPressure(jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard)

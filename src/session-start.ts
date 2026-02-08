@@ -31,12 +31,14 @@ async function main(): Promise<void> {
 
     // Write minimal config IMMEDIATELY (failure recovery point)
     // If SessionStart crashes after this, downstream hooks have valid config to read
+    // Cache config here to prevent hot-reload race in downstream hooks
     ensureStateDir()
     const minimalConfig: SessionConfig = {
       sessionId,
       startedAt: Date.now(),
       injectionMethod: 'detecting',
-      injectionTarget: ''
+      injectionTarget: '',
+      cachedConfig: config  // Cache full config to prevent hot-reload
     }
     writeSessionConfig(sessionId, minimalConfig)
 

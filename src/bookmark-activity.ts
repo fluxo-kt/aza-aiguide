@@ -45,11 +45,15 @@ export function handleSubagentStop(sessionId: string, data: Record<string, unkno
   const charCount = measureSize(data.output ?? data.result ?? data.response ?? data.agent_output)
   appendEvent(sessionId, `A ${Date.now()} ${charCount}`, logDir)
 
-  const config = loadConfig(configPath)
   const metrics = parseLog(sessionId, logDir)
 
   // Read session config ONCE — shared by both compaction and bookmark evaluation
   const sessionConfig = readSessionConfig(sessionId, sessionStateDir)
+
+  // Use cached config from SessionStart (prevents hot-reload race)
+  // Fallback to loadConfig() only if session started before config caching was implemented
+  const config = sessionConfig?.cachedConfig || loadConfig(configPath)
+
   const injectionMethod = sessionConfig?.injectionMethod ?? 'disabled'
   const injectionTarget = sessionConfig?.injectionTarget ?? ''
   const jsonlPath = sessionConfig?.jsonlPath ?? null

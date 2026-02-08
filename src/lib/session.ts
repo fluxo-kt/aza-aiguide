@@ -3,6 +3,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import { sanitizeSessionId, ensureStateDir } from './log'
+import type { TavConfig } from './config'
 
 /**
  * Terminal location snapshot captured at session start.
@@ -29,6 +30,7 @@ export interface SessionConfig {
   jsonlPath?: string           // cached JSONL path for context pressure reading (resolved at SessionStart)
   location?: SessionLocation   // terminal location at session start
   disabledReason?: string
+  cachedConfig?: TavConfig      // Full config loaded at SessionStart (prevents hot-reload race)
 }
 
 function resolveStateDir(stateDir?: string): string {

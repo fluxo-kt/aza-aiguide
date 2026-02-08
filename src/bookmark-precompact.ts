@@ -39,12 +39,15 @@ export function processPreCompact(
   // in the context. The B marker ensures thresholds start from zero.
   appendEvent(sessionId, `B ${Date.now()}`, logDir)
 
+  // Read session config for cached config and JSONL path
+  const sessionConfig = readSessionConfig(sessionId, sessionStateDir)
+
   // Optionally compute real context pressure for informational message
   let pressureInfo = ''
   try {
-    const sessionConfig = readSessionConfig(sessionId, sessionStateDir)
     if (sessionConfig?.jsonlPath) {
-      const config = loadConfig()
+      // Use cached config from SessionStart (prevents hot-reload race)
+      const config = sessionConfig.cachedConfig || loadConfig()
       const pressure = getContextPressure(sessionConfig.jsonlPath, metrics.cumulativeEstimatedTokens, config.contextGuard)
       pressureInfo = ` Context pressure at compaction: ${(pressure * 100).toFixed(0)}%.`
     }

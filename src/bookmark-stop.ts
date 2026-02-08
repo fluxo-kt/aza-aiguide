@@ -41,7 +41,6 @@ export function evaluateBookmark(
  */
 async function main(): Promise<void> {
   try {
-    const config = loadConfig()
     const input = await readStdin(4000)
     const data: Record<string, unknown> = JSON.parse(input)
 
@@ -60,6 +59,10 @@ async function main(): Promise<void> {
       console.log(JSON.stringify({ continue: true }))
       return
     }
+
+    // Use cached config from SessionStart (prevents hot-reload race)
+    // Fallback to loadConfig() only if session started before config caching was implemented
+    const config = sessionConfig.cachedConfig || loadConfig()
 
     const injectionMethod = (sessionConfig.injectionMethod || 'disabled') as InjectionMethod
     const injectionTarget = sessionConfig.injectionTarget || ''
