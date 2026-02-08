@@ -46,7 +46,7 @@ export interface TavConfig {
 
 export const DEFAULT_CONFIG: TavConfig = {
   bookmarks: {
-    enabled: true,
+    enabled: false,
     marker: '\u00B7', // middle dot
     thresholds: {
       minTokens: 6000,
@@ -57,7 +57,7 @@ export const DEFAULT_CONFIG: TavConfig = {
     },
   },
   contextGuard: {
-    enabled: true,
+    enabled: false,
     contextWindowTokens: 200000,
     compactPercent: 0.76,
     denyPercent: 0.85,

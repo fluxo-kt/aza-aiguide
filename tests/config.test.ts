@@ -127,8 +127,8 @@ describe('config loader', () => {
     }), 'utf-8')
     const config = loadConfig(configPath)
 
-    // Non-boolean 'enabled' should fall back to default (true)
-    expect(config.bookmarks.enabled).toBe(true)
+    // Non-boolean 'enabled' should fall back to default (false)
+    expect(config.bookmarks.enabled).toBe(false)
     expect(typeof config.bookmarks.enabled).toBe('boolean')
   })
 
@@ -154,14 +154,14 @@ describe('config loader', () => {
   })
 
   test('DEFAULT_CONFIG has correct default values', () => {
-    expect(DEFAULT_CONFIG.bookmarks.enabled).toBe(true)
+    expect(DEFAULT_CONFIG.bookmarks.enabled).toBe(false)
     expect(DEFAULT_CONFIG.bookmarks.marker).toBe('\u00B7')
     expect(DEFAULT_CONFIG.bookmarks.thresholds.minTokens).toBe(6000)
     expect(DEFAULT_CONFIG.bookmarks.thresholds.minToolCalls).toBe(15)
     expect(DEFAULT_CONFIG.bookmarks.thresholds.minSeconds).toBe(120)
     expect(DEFAULT_CONFIG.bookmarks.thresholds.agentBurstThreshold).toBe(3)
     expect(DEFAULT_CONFIG.bookmarks.thresholds.cooldownSeconds).toBe(25)
-    expect(DEFAULT_CONFIG.contextGuard.enabled).toBe(true)
+    expect(DEFAULT_CONFIG.contextGuard.enabled).toBe(false)
     expect(DEFAULT_CONFIG.contextGuard.contextWindowTokens).toBe(200000)
     expect(DEFAULT_CONFIG.contextGuard.compactPercent).toBe(0.76)
     expect(DEFAULT_CONFIG.contextGuard.denyPercent).toBe(0.85)
@@ -178,7 +178,7 @@ describe('config loader', () => {
     // User override applied
     expect(config.contextGuard.compactPercent).toBe(0.60)
     // Missing fields fall back to defaults
-    expect(config.contextGuard.enabled).toBe(true)
+    expect(config.contextGuard.enabled).toBe(false)
     expect(config.contextGuard.contextWindowTokens).toBe(200000)
     expect(config.contextGuard.denyPercent).toBe(0.85)
     expect(config.contextGuard.compactCooldownSeconds).toBe(120)
@@ -211,7 +211,7 @@ describe('config loader', () => {
     }), 'utf-8')
     const config = loadConfig(configPath)
 
-    expect(config.contextGuard.enabled).toBe(true)
+    expect(config.contextGuard.enabled).toBe(false)
     expect(typeof config.contextGuard.enabled).toBe('boolean')
   })
 

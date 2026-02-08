@@ -88,6 +88,14 @@ bunx tsc --noEmit        # typecheck (includes tests)
 
 `~/.claude/tav/config.json` — partial configs deep-merged with defaults. All threshold values validated via `validNumber()` (rejects `Infinity`, null, arrays, objects that `Number()` would silently coerce to 0).
 
+**Both bookmarks and context guard are disabled by default.** To activate, set `enabled: true` in config:
+```json
+{
+  "bookmarks": { "enabled": true },
+  "contextGuard": { "enabled": true }
+}
+```
+
 **Bookmark thresholds**: `minTokens:6000`, `minToolCalls:15`, `minSeconds:120`, `agentBurstThreshold:3`, `cooldownSeconds:25`. ANY threshold met triggers bookmark.
 
 **Context guard** (defence-in-depth):

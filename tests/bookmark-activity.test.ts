@@ -4,6 +4,15 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { handlePostToolUse, handleSubagentStop } from '../src/bookmark-activity'
 import { sanitizeSessionId } from '../src/lib/log'
+import { DEFAULT_CONFIG } from '../src/lib/config'
+import type { TavConfig } from '../src/lib/config'
+
+/** Config with both features enabled — for testing active behaviour */
+const ACTIVE_CONFIG: TavConfig = {
+  ...DEFAULT_CONFIG,
+  bookmarks: { ...DEFAULT_CONFIG.bookmarks, enabled: true },
+  contextGuard: { ...DEFAULT_CONFIG.contextGuard, enabled: true },
+}
 
 const TEST_SESSION_ID = 'test-session-123'
 
@@ -172,7 +181,8 @@ describe('bookmark-activity', () => {
     test('triggers injection at burst threshold', () => {
       writeSessionConfig(TEST_SESSION_ID, stateDir, {
         injectionMethod: 'tmux',
-        injectionTarget: '%1'
+        injectionTarget: '%1',
+        cachedConfig: ACTIVE_CONFIG
       })
 
       const data = { output: 'test' }
@@ -262,7 +272,8 @@ describe('bookmark-activity', () => {
     test('triggers on token threshold via tool results', () => {
       writeSessionConfig(TEST_SESSION_ID, stateDir, {
         injectionMethod: 'tmux',
-        injectionTarget: '%1'
+        injectionTarget: '%1',
+        cachedConfig: ACTIVE_CONFIG
       })
 
       // Pre-populate log with T lines totalling >= 6000 tokens (24000 chars)
@@ -290,7 +301,8 @@ describe('bookmark-activity', () => {
     test('triggers on tool call count threshold', () => {
       writeSessionConfig(TEST_SESSION_ID, stateDir, {
         injectionMethod: 'tmux',
-        injectionTarget: '%1'
+        injectionTarget: '%1',
+        cachedConfig: ACTIVE_CONFIG
       })
 
       // Pre-populate log with 15 T lines (>= minToolCalls default of 15)
@@ -348,7 +360,8 @@ describe('bookmark-activity', () => {
     test('triggers compaction when pressure exceeds compactPercent', () => {
       writeSessionConfig(TEST_SESSION_ID, stateDir, {
         injectionMethod: 'tmux',
-        injectionTarget: '%1'
+        injectionTarget: '%1',
+        cachedConfig: ACTIVE_CONFIG
       })
 
       // Fallback pressure = cumulativeEstimatedTokens / (windowTokens × responseRatio)
@@ -490,7 +503,8 @@ describe('bookmark-activity', () => {
     test('burst compaction triggers at lower threshold than normal compaction', () => {
       writeSessionConfig(TEST_SESSION_ID, stateDir, {
         injectionMethod: 'tmux',
-        injectionTarget: '%1'
+        injectionTarget: '%1',
+        cachedConfig: ACTIVE_CONFIG
       })
 
       // Burst compaction uses compactPercent × 0.8 = 0.76 × 0.8 = 0.608

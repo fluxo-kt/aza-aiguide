@@ -8,7 +8,7 @@ const path_1 = require("path");
 const os_1 = require("os");
 exports.DEFAULT_CONFIG = {
     bookmarks: {
-        enabled: true,
+        enabled: false,
         marker: '\u00B7', // middle dot
         thresholds: {
             minTokens: 6000,
@@ -19,7 +19,7 @@ exports.DEFAULT_CONFIG = {
         },
     },
     contextGuard: {
-        enabled: true,
+        enabled: false,
         contextWindowTokens: 200000,
         compactPercent: 0.76,
         denyPercent: 0.85,

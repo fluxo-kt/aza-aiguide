@@ -4,6 +4,13 @@ import { DEFAULT_CONFIG } from '../src/lib/config'
 import type { TavConfig, ContextGuardConfig } from '../src/lib/config'
 import type { LogMetrics } from '../src/lib/log'
 
+/** Config with both features enabled — for testing active behaviour */
+const ACTIVE_CONFIG: TavConfig = {
+  ...DEFAULT_CONFIG,
+  bookmarks: { ...DEFAULT_CONFIG.bookmarks, enabled: true },
+  contextGuard: { ...DEFAULT_CONFIG.contextGuard, enabled: true },
+}
+
 function defaultMetrics(): LogMetrics {
   return {
     toolCalls: 0,
@@ -33,14 +40,14 @@ describe('shouldInjectBookmark', () => {
 
   test('returns false when injection method is disabled', () => {
     const metrics = { ...defaultMetrics(), toolCalls: 100, estimatedTokens: 50000, elapsedSeconds: 999 }
-    const result = shouldInjectBookmark({ config: DEFAULT_CONFIG, metrics, injectionMethod: 'disabled' })
+    const result = shouldInjectBookmark({ config: ACTIVE_CONFIG, metrics, injectionMethod: 'disabled' })
     expect(result.shouldInject).toBe(false)
     expect(result.reason).toContain('disabled')
   })
 
   test('returns false when last line is bookmark', () => {
     const metrics = { ...defaultMetrics(), toolCalls: 100, estimatedTokens: 50000, elapsedSeconds: 999, lastLineIsBookmark: true }
-    const result = shouldInjectBookmark({ config: DEFAULT_CONFIG, metrics, injectionMethod: 'tmux' })
+    const result = shouldInjectBookmark({ config: ACTIVE_CONFIG, metrics, injectionMethod: 'tmux' })
     expect(result.shouldInject).toBe(false)
     expect(result.reason).toContain('bookmark')
   })
@@ -53,7 +60,7 @@ describe('shouldInjectBookmark', () => {
       elapsedSeconds: 999,
       lastInjectionAt: Date.now() - 5000 // 5s ago, cooldown is 25s
     }
-    const result = shouldInjectBookmark({ config: DEFAULT_CONFIG, metrics, injectionMethod: 'tmux' })
+    const result = shouldInjectBookmark({ config: ACTIVE_CONFIG, metrics, injectionMethod: 'tmux' })
     expect(result.shouldInject).toBe(false)
     expect(result.reason).toContain('cooldown')
   })
@@ -65,7 +72,7 @@ describe('shouldInjectBookmark', () => {
       estimatedTokens: 10000, // above minTokens (6000)
       elapsedSeconds: 200 // above minSeconds (120)
     }
-    const result = shouldInjectBookmark({ config: DEFAULT_CONFIG, metrics, injectionMethod: 'tmux' })
+    const result = shouldInjectBookmark({ config: ACTIVE_CONFIG, metrics, injectionMethod: 'tmux' })
     expect(result.shouldInject).toBe(true)
   })
 
@@ -76,7 +83,7 @@ describe('shouldInjectBookmark', () => {
       estimatedTokens: 100,
       elapsedSeconds: 5
     }
-    const result = shouldInjectBookmark({ config: DEFAULT_CONFIG, metrics, injectionMethod: 'tmux' })
+    const result = shouldInjectBookmark({ config: ACTIVE_CONFIG, metrics, injectionMethod: 'tmux' })
     expect(result.shouldInject).toBe(false)
   })
 
@@ -100,17 +107,17 @@ describe('shouldInjectBookmark', () => {
       lastInjectionAt: 0,
       lastBookmarkAt: Date.now() - 3000 // 3s ago, cooldown is 25s
     }
-    const result = shouldInjectBookmark({ config: DEFAULT_CONFIG, metrics, injectionMethod: 'tmux' })
+    const result = shouldInjectBookmark({ config: ACTIVE_CONFIG, metrics, injectionMethod: 'tmux' })
     expect(result.shouldInject).toBe(false)
     expect(result.reason).toContain('cooldown')
   })
 })
 
 describe('shouldCompact', () => {
-  const defaultCG: ContextGuardConfig = DEFAULT_CONFIG.contextGuard
+  const activeCG: ContextGuardConfig = ACTIVE_CONFIG.contextGuard
 
   test('returns false when context guard disabled', () => {
-    const config: ContextGuardConfig = { ...defaultCG, enabled: false }
+    const config: ContextGuardConfig = { ...activeCG, enabled: false }
     const result = shouldCompact({
       pressure: 0.90,
       config,
@@ -124,7 +131,7 @@ describe('shouldCompact', () => {
   test('returns false when injection method is disabled', () => {
     const result = shouldCompact({
       pressure: 0.90,
-      config: defaultCG,
+      config: activeCG,
       metrics: defaultMetrics(),
       injectionMethod: 'disabled'
     })
@@ -135,7 +142,7 @@ describe('shouldCompact', () => {
   test('returns false when pressure below compactPercent', () => {
     const result = shouldCompact({
       pressure: 0.50,
-      config: defaultCG,
+      config: activeCG,
       metrics: defaultMetrics(),
       injectionMethod: 'tmux'
     })
@@ -146,7 +153,7 @@ describe('shouldCompact', () => {
   test('returns true when pressure at compactPercent', () => {
     const result = shouldCompact({
       pressure: 0.76,
-      config: defaultCG,
+      config: activeCG,
       metrics: defaultMetrics(),
       injectionMethod: 'tmux'
     })
@@ -157,7 +164,7 @@ describe('shouldCompact', () => {
   test('returns true when pressure above compactPercent', () => {
     const result = shouldCompact({
       pressure: 0.90,
-      config: defaultCG,
+      config: activeCG,
       metrics: defaultMetrics(),
       injectionMethod: 'tmux'
     })
@@ -171,7 +178,7 @@ describe('shouldCompact', () => {
     }
     const result = shouldCompact({
       pressure: 0.90,
-      config: defaultCG,
+      config: activeCG,
       metrics,
       injectionMethod: 'tmux'
     })
@@ -186,7 +193,7 @@ describe('shouldCompact', () => {
     }
     const result = shouldCompact({
       pressure: 0.80,
-      config: defaultCG,
+      config: activeCG,
       metrics,
       injectionMethod: 'tmux'
     })
@@ -194,7 +201,7 @@ describe('shouldCompact', () => {
   })
 
   test('guard ordering: disabled checked before pressure', () => {
-    const config: ContextGuardConfig = { ...defaultCG, enabled: false }
+    const config: ContextGuardConfig = { ...activeCG, enabled: false }
     const result = shouldCompact({
       pressure: 0.99,
       config,
@@ -208,7 +215,7 @@ describe('shouldCompact', () => {
   test('guard ordering: injection method checked before pressure', () => {
     const result = shouldCompact({
       pressure: 0.99,
-      config: defaultCG,
+      config: activeCG,
       metrics: defaultMetrics(),
       injectionMethod: 'disabled'
     })
@@ -217,7 +224,7 @@ describe('shouldCompact', () => {
   })
 
   test('works with custom compactPercent', () => {
-    const config: ContextGuardConfig = { ...defaultCG, compactPercent: 0.50 }
+    const config: ContextGuardConfig = { ...activeCG, compactPercent: 0.50 }
     const result = shouldCompact({
       pressure: 0.55,
       config,
