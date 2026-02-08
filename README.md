@@ -82,6 +82,21 @@ Partial configs are deep-merged with defaults — only specify what you want to 
 
 Set `"enabled": false` to disable bookmarks entirely without uninstalling.
 
+## Known Issues & Limitations
+
+### osascript Requires Terminal Focus (macOS)
+
+If using osascript injection (fallback when tmux/screen unavailable), bookmarks are only injected when the terminal is the **active foreground application**. If you switch to another app (browser, IDE), injection is silently skipped for security.
+
+**Why:** Without this check, keystrokes could land in the wrong application, potentially triggering unintended actions.
+
+**Workarounds:**
+- **Recommended:** Use tmux or screen (no focus requirement)
+- Keep terminal window focused during Claude Code sessions
+- Manually type `·` (middle dot) if you need a bookmark while terminal is unfocused
+
+**Detection:** SessionStart will show which injection method is active in `~/.claude/tav/state/{sessionId}.json`
+
 ## Update
 
 ```bash
