@@ -48,6 +48,18 @@
         ]
       }
     ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '\"${BUN:-bun}\" run \"${CLAUDE_PLUGIN_ROOT}/src/bookmark-precompact.ts\" 2>/dev/null || node \"${CLAUDE_PLUGIN_ROOT}/dist/bookmark-precompact.js\"'",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": "*",
