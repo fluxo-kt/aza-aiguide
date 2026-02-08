@@ -182,14 +182,12 @@ export function requestBookmark(
 ): boolean {
   if (injection.method === 'disabled') return false
 
-  appendEvent(sessionId, `I ${Date.now()}`, stateDir)
-
   const command = buildInjectionCommand(injection.method, injection.target, marker)
-  if (command) {
-    spawnDetached(command)
-    return true
-  }
-  return false
+  if (!command) return false
+
+  appendEvent(sessionId, `I ${Date.now()}`, stateDir)
+  spawnDetached(command)
+  return true
 }
 
 /**
@@ -204,12 +202,10 @@ export function requestCompaction(
 ): boolean {
   if (injection.method === 'disabled') return false
 
-  appendEvent(sessionId, `C ${Date.now()}`, stateDir)
-
   const command = buildInjectionCommand(injection.method, injection.target, '/compact')
-  if (command) {
-    spawnDetached(command)
-    return true
-  }
-  return false
+  if (!command) return false
+
+  appendEvent(sessionId, `C ${Date.now()}`, stateDir)
+  spawnDetached(command)
+  return true
 }
