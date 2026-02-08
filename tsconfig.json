@@ -10,7 +10,7 @@
     "declaration": false,
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["bun-types", "@types/node"]
+    "types": ["@types/bun", "@types/node"]
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules", "dist"]
