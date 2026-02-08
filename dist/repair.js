@@ -6,6 +6,9 @@ exports.resolveSessionFiles = resolveSessionFiles;
 exports.extractMetadata = extractMetadata;
 exports.findBreakPoints = findBreakPoints;
 exports.findLastCompactBoundary = findLastCompactBoundary;
+exports.buildChain = buildChain;
+exports.findChainBreakPoints = findChainBreakPoints;
+exports.insertChainBookmarks = insertChainBookmarks;
 exports.createSyntheticEntry = createSyntheticEntry;
 exports.midpointTimestamp = midpointTimestamp;
 exports.validate = validate;
@@ -169,6 +172,131 @@ function findLastCompactBoundary(entries) {
     }
     return -1;
 }
+/**
+ * Builds the parentUuid chain from the last entry backwards.
+ * Returns entries in chronological order (oldest first).
+ * This is the ACTUAL conversation path that CC's rewind UI follows.
+ */
+function buildChain(entries) {
+    const byUuid = new Map();
+    for (let i = 0; i < entries.length; i++) {
+        const { entry } = entries[i];
+        if (entry?.uuid) {
+            byUuid.set(entry.uuid, { entry, fileIndex: i });
+        }
+    }
+    // Find last entry with a uuid
+    let lastEntry;
+    for (let i = entries.length - 1; i >= 0; i--) {
+        const { entry } = entries[i];
+        if (entry?.uuid) {
+            lastEntry = { entry, fileIndex: i };
+            break;
+        }
+    }
+    if (!lastEntry)
+        return [];
+    // Walk backwards via parentUuid
+    const chain = [];
+    let current = lastEntry;
+    const visited = new Set();
+    while (current) {
+        if (visited.has(current.entry.uuid))
+            break;
+        visited.add(current.entry.uuid);
+        chain.push(current);
+        if (!current.entry.parentUuid)
+            break;
+        current = byUuid.get(current.entry.parentUuid);
+    }
+    chain.reverse();
+    return chain;
+}
+/**
+ * Finds break points on the chain. Returns indices into the chain array.
+ * Same criteria as findBreakPoints but operates on the actual conversation chain.
+ */
+function findChainBreakPoints(chain, startFileIndex, interval) {
+    const breakPoints = [];
+    let assistantCount = 0;
+    let lastBreakChainIdx = -1;
+    for (let i = 0; i < chain.length; i++) {
+        if (chain[i].fileIndex < startFileIndex)
+            continue;
+        const { entry } = chain[i];
+        if (entry.type === 'assistant')
+            assistantCount++;
+        if (assistantCount >= interval && entry.type === 'assistant' && i > 0) {
+            breakPoints.push(i);
+            assistantCount = 0;
+            lastBreakChainIdx = i;
+        }
+        if (entry.type === 'system' && entry.subtype === 'turn_duration') {
+            if (lastBreakChainIdx < 0 || i > lastBreakChainIdx + 1) {
+                breakPoints.push(i);
+                assistantCount = 0;
+                lastBreakChainIdx = i;
+            }
+        }
+        if (i > 0 && chain[i - 1].fileIndex >= startFileIndex) {
+            const prev = chain[i - 1].entry;
+            if (prev.timestamp && entry.timestamp) {
+                const gap = new Date(entry.timestamp).getTime() - new Date(prev.timestamp).getTime();
+                if (gap > 60000 && (lastBreakChainIdx < 0 || i > lastBreakChainIdx + 1)) {
+                    breakPoints.push(i);
+                    assistantCount = 0;
+                    lastBreakChainIdx = i;
+                }
+            }
+        }
+    }
+    return [...new Set(breakPoints)].sort((a, b) => a - b);
+}
+/**
+ * Inserts bookmarks ON the chain. Two-phase approach:
+ * 1. Create all synthetics, record insertions and reparents
+ * 2. Rebuild entry array with insertions and reparents applied
+ *
+ * Re-parents chain successors (not file-adjacent entries) so bookmarks
+ * are always on the parentUuid path that CC's rewind UI follows.
+ */
+function insertChainBookmarks(entries, chain, chainBreakPoints, metadata, marker) {
+    if (chainBreakPoints.length === 0) {
+        return { result: entries, inserted: 0 };
+    }
+    // Phase 1: create synthetics, record where they go and what to reparent
+    const insertAfter = new Map();
+    const reparents = new Map();
+    for (const chainIdx of chainBreakPoints) {
+        const breakEntry = chain[chainIdx];
+        if (!breakEntry?.entry?.uuid)
+            continue;
+        const nextInChain = chain[chainIdx + 1];
+        if (!nextInChain?.entry?.uuid)
+            continue;
+        const beforeTs = breakEntry.entry.timestamp ?? new Date().toISOString();
+        const afterTs = nextInChain.entry.timestamp ?? beforeTs;
+        const ts = midpointTimestamp(beforeTs, afterTs);
+        const synthetic = createSyntheticEntry(metadata, breakEntry.entry.uuid, ts, marker);
+        insertAfter.set(breakEntry.fileIndex, { entry: synthetic, raw: JSON.stringify(synthetic) });
+        reparents.set(nextInChain.entry.uuid, synthetic.uuid);
+    }
+    // Phase 2: rebuild array with insertions and reparents
+    const result = [];
+    for (let i = 0; i < entries.length; i++) {
+        let current = entries[i];
+        if (current.entry?.uuid && reparents.has(current.entry.uuid)) {
+            const modified = { ...current.entry };
+            modified.parentUuid = reparents.get(current.entry.uuid);
+            current = { entry: modified, raw: JSON.stringify(modified) };
+        }
+        result.push(current);
+        const insertion = insertAfter.get(i);
+        if (insertion)
+            result.push(insertion);
+    }
+    return { result, inserted: insertAfter.size };
+}
 // --- Synthetic Entry Generation ---
 /**
  * Creates a synthetic user message entry that CC will interpret as a
@@ -318,23 +446,29 @@ function repair(filePath, options = exports.DEFAULT_REPAIR_OPTIONS) {
         result.errors.push('No user entry found — cannot extract session metadata');
         return result;
     }
-    // Find last compact_boundary
+    // Build the parentUuid chain (the actual path CC's rewind UI follows)
+    const chain = buildChain(entries);
+    if (chain.length === 0) {
+        result.errors.push('Cannot build parentUuid chain — no entries with uuid');
+        return result;
+    }
+    // Find last compact_boundary to scope break points
     const lastCompactIdx = findLastCompactBoundary(entries);
-    const startIdx = lastCompactIdx === -1 ? 0 : lastCompactIdx + 1;
-    // Find break points
-    const breakPoints = findBreakPoints(entries, startIdx, options.interval);
-    if (breakPoints.length === 0) {
-        result.warnings.push('No break points found — file may be too short or already well-segmented');
+    const startFileIndex = lastCompactIdx === -1 ? 0 : lastCompactIdx + 1;
+    // Find break points ON THE CHAIN (not file order)
+    const chainBreakPoints = findChainBreakPoints(chain, startFileIndex, options.interval);
+    if (chainBreakPoints.length === 0) {
+        result.warnings.push('No break points found on chain — file may be too short or already well-segmented');
         return result;
     }
     // Dry run — report but don't modify
     if (options.dryRun) {
-        result.inserted = breakPoints.length;
-        result.warnings.push(`DRY RUN: Would insert ${breakPoints.length} rewind points`);
-        for (const bp of breakPoints) {
-            const entry = entries[bp]?.entry;
+        result.inserted = chainBreakPoints.length;
+        result.warnings.push(`DRY RUN: Would insert ${chainBreakPoints.length} rewind points`);
+        for (const bp of chainBreakPoints) {
+            const entry = chain[bp]?.entry;
             const ts = entry?.timestamp ?? 'unknown';
-            result.warnings.push(`  Break at line ${bp + 1} (${ts})`);
+            result.warnings.push(`  Break at chain[${bp}] file line ${chain[bp].fileIndex + 1} (${ts})`);
         }
         return result;
     }
@@ -348,8 +482,8 @@ function repair(filePath, options = exports.DEFAULT_REPAIR_OPTIONS) {
         result.errors.push(`Cannot create backup: ${backupPath}`);
         return result;
     }
-    // Insert bookmarks
-    const { result: modifiedEntries, inserted } = insertBookmarks(entries, breakPoints, metadata, options.marker);
+    // Insert bookmarks ON THE CHAIN (re-parents chain successors, not file-adjacent)
+    const { result: modifiedEntries, inserted } = insertChainBookmarks(entries, chain, chainBreakPoints, metadata, options.marker);
     result.inserted = inserted;
     // Validate
     if (options.verify) {
