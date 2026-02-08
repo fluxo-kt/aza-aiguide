@@ -163,6 +163,40 @@ describe('log', () => {
     expect(metrics.lastLineIsBookmark).toBe(true)
   })
 
+  test('parseLog tracks cumulativeEstimatedTokens across entire log', () => {
+    const sessionId = 'cumulative-test'
+
+    appendEvent(sessionId, 'T 1000 400', testDir)   // 100 tokens
+    appendEvent(sessionId, 'A 2000 800', testDir)   // 200 tokens
+    appendEvent(sessionId, 'B 3000', testDir)        // bookmark resets window
+    appendEvent(sessionId, 'T 4000 200', testDir)   // 50 tokens
+    appendEvent(sessionId, 'A 5000 600', testDir)   // 150 tokens
+
+    const metrics = parseLog(sessionId, testDir)
+    // estimatedTokens only counts after last bookmark: (200 + 600) / 4 = 200
+    expect(metrics.estimatedTokens).toBe(200)
+    // cumulativeEstimatedTokens counts ALL T/A lines: (400 + 800 + 200 + 600) / 4 = 500
+    expect(metrics.cumulativeEstimatedTokens).toBe(500)
+  })
+
+  test('parseLog tracks lastCompactionAt from C events', () => {
+    const sessionId = 'compaction-test'
+
+    appendEvent(sessionId, 'T 1000 100', testDir)
+    appendEvent(sessionId, 'C 2000', testDir)
+    appendEvent(sessionId, 'T 3000 200', testDir)
+    appendEvent(sessionId, 'C 4000', testDir)
+
+    const metrics = parseLog(sessionId, testDir)
+    expect(metrics.lastCompactionAt).toBe(4000)
+  })
+
+  test('parseLog returns zero for new cumulative fields when log missing', () => {
+    const metrics = parseLog('nonexistent', testDir)
+    expect(metrics.cumulativeEstimatedTokens).toBe(0)
+    expect(metrics.lastCompactionAt).toBe(0)
+  })
+
   test('parseLog skips malformed lines without NaN propagation', () => {
     const sessionId = 'malformed-test'
 
@@ -223,9 +257,11 @@ describe('log', () => {
       toolCalls: 0,
       agentReturns: 0,
       estimatedTokens: 0,
+      cumulativeEstimatedTokens: 0,
       elapsedSeconds: 0,
       lastInjectionAt: 0,
       lastBookmarkAt: 0,
+      lastCompactionAt: 0,
       lastLineIsBookmark: false
     }
 

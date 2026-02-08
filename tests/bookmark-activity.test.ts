@@ -345,6 +345,88 @@ describe('bookmark-activity', () => {
       expect(iLines.length).toBe(0)
     })
 
+    test('triggers compaction when cumulative tokens exceed compactThreshold', () => {
+      writeSessionConfig(TEST_SESSION_ID, stateDir, {
+        injectionMethod: 'tmux',
+        injectionTarget: '%1'
+      })
+
+      // Pre-populate log with enough chars to exceed compactThreshold (30000 tokens = 120000 chars)
+      const logPath = getLogPath(TEST_SESSION_ID, logDir)
+      const now = Date.now()
+      let logContent = ''
+      for (let i = 0; i < 50; i++) {
+        logContent += `T ${now - 5000 + i * 100} 2500\n`  // 50 * 2500 = 125000 chars = 31250 tokens
+      }
+      writeFileSync(logPath, logContent)
+
+      const data = { output: 'test' }
+      handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
+
+      const log = readLog(TEST_SESSION_ID, logDir)
+      const lines = log.trim().split('\n')
+      const cLines = lines.filter(line => line.startsWith('C '))
+
+      expect(cLines.length).toBe(1)
+    })
+
+    test('compaction respects its own cooldown', () => {
+      writeSessionConfig(TEST_SESSION_ID, stateDir, {
+        injectionMethod: 'tmux',
+        injectionTarget: '%1'
+      })
+
+      // Pre-populate with enough chars + a recent C line (within cooldown)
+      const logPath = getLogPath(TEST_SESSION_ID, logDir)
+      const now = Date.now()
+      let logContent = `C ${now - 5000}\n`  // Compaction 5s ago (cooldown is 120s)
+      for (let i = 0; i < 50; i++) {
+        logContent += `T ${now - 4000 + i * 50} 2500\n`
+      }
+      writeFileSync(logPath, logContent)
+
+      const data = { output: 'test' }
+      handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
+
+      const log = readLog(TEST_SESSION_ID, logDir)
+      const lines = log.trim().split('\n')
+      const cLines = lines.filter(line => line.startsWith('C '))
+
+      // Should still have only the original C line — cooldown blocks new compaction
+      expect(cLines.length).toBe(1)
+    })
+
+    test('compaction does not fire when contextGuard disabled', () => {
+      writeSessionConfig(TEST_SESSION_ID, stateDir, {
+        injectionMethod: 'tmux',
+        injectionTarget: '%1'
+      })
+
+      // Write config with contextGuard disabled
+      const configPath = join(logDir, 'no-cg-config.json')
+      writeFileSync(configPath, JSON.stringify({
+        contextGuard: { enabled: false }
+      }))
+
+      // Pre-populate with enough chars
+      const logPath = getLogPath(TEST_SESSION_ID, logDir)
+      const now = Date.now()
+      let logContent = ''
+      for (let i = 0; i < 50; i++) {
+        logContent += `T ${now - 5000 + i * 100} 2500\n`
+      }
+      writeFileSync(logPath, logContent)
+
+      const data = { output: 'test' }
+      handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir, configPath)
+
+      const log = readLog(TEST_SESSION_ID, logDir)
+      const lines = log.trim().split('\n')
+      const cLines = lines.filter(line => line.startsWith('C '))
+
+      expect(cLines.length).toBe(0)
+    })
+
     test('does not trigger when last line is bookmark', () => {
       writeSessionConfig(TEST_SESSION_ID, stateDir, {
         injectionMethod: 'tmux',

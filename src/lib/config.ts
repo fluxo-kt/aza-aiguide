@@ -16,8 +16,16 @@ export interface BookmarkConfig {
   thresholds: ThresholdConfig
 }
 
+export interface ContextGuardConfig {
+  enabled: boolean
+  compactThreshold: number   // estimated response tokens before injecting /compact
+  compactCooldownSeconds: number
+  denyThreshold: number      // estimated tokens before denying new Task spawns (PreToolUse)
+}
+
 export interface TavConfig {
   bookmarks: BookmarkConfig
+  contextGuard: ContextGuardConfig
 }
 
 export const DEFAULT_CONFIG: TavConfig = {
@@ -31,6 +39,12 @@ export const DEFAULT_CONFIG: TavConfig = {
       agentBurstThreshold: 3,
       cooldownSeconds: 25,
     },
+  },
+  contextGuard: {
+    enabled: true,
+    compactThreshold: 30000,
+    compactCooldownSeconds: 120,
+    denyThreshold: 45000,
   },
 }
 
@@ -89,6 +103,9 @@ function validateConfig(config: TavConfig): TavConfig {
   const t = config.bookmarks.thresholds
   const dt = d.thresholds
 
+  const cg = config.contextGuard
+  const dcg = DEFAULT_CONFIG.contextGuard
+
   return {
     bookmarks: {
       enabled: typeof config.bookmarks.enabled === 'boolean'
@@ -104,6 +121,12 @@ function validateConfig(config: TavConfig): TavConfig {
         agentBurstThreshold: validNumber(t.agentBurstThreshold, dt.agentBurstThreshold),
         cooldownSeconds: validNumber(t.cooldownSeconds, dt.cooldownSeconds),
       },
+    },
+    contextGuard: {
+      enabled: typeof cg.enabled === 'boolean' ? cg.enabled : dcg.enabled,
+      compactThreshold: validNumber(cg.compactThreshold, dcg.compactThreshold),
+      compactCooldownSeconds: validNumber(cg.compactCooldownSeconds, dcg.compactCooldownSeconds),
+      denyThreshold: validNumber(cg.denyThreshold, dcg.denyThreshold),
     },
   }
 }

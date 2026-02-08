@@ -1,5 +1,6 @@
-import { spawn, execSync } from 'child_process';
-import type { ChildProcess } from 'child_process';
+import { spawn, execSync } from 'child_process'
+import type { ChildProcess } from 'child_process'
+import { appendEvent } from './log'
 
 export type InjectionMethod = 'tmux' | 'screen' | 'osascript' | 'disabled';
 
@@ -166,4 +167,49 @@ export function spawnDetached(command: string): void {
   } catch {
     // Silently ignore errors
   }
+}
+
+/**
+ * High-level bookmark injection: appends pre-spawn 'I' marker, builds
+ * injection command for the configured marker, and spawns detached.
+ * Returns true if injection was spawned, false if method is disabled.
+ */
+export function requestBookmark(
+  sessionId: string,
+  injection: InjectionConfig,
+  marker: string,
+  stateDir?: string
+): boolean {
+  if (injection.method === 'disabled') return false
+
+  appendEvent(sessionId, `I ${Date.now()}`, stateDir)
+
+  const command = buildInjectionCommand(injection.method, injection.target, marker)
+  if (command) {
+    spawnDetached(command)
+    return true
+  }
+  return false
+}
+
+/**
+ * High-level compaction injection: appends pre-spawn 'C' marker, builds
+ * injection command for '/compact', and spawns detached.
+ * Returns true if injection was spawned, false if method is disabled.
+ */
+export function requestCompaction(
+  sessionId: string,
+  injection: InjectionConfig,
+  stateDir?: string
+): boolean {
+  if (injection.method === 'disabled') return false
+
+  appendEvent(sessionId, `C ${Date.now()}`, stateDir)
+
+  const command = buildInjectionCommand(injection.method, injection.target, '/compact')
+  if (command) {
+    spawnDetached(command)
+    return true
+  }
+  return false
 }

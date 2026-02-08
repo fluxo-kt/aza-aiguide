@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { loadConfig } from './lib/config'
 import { appendEvent, parseLog, sanitizeSessionId, meetsAnyThreshold } from './lib/log'
-import { buildInjectionCommand, spawnDetached } from './lib/inject'
-import type { InjectionMethod } from './lib/inject'
+import { buildInjectionCommand, spawnDetached, requestCompaction } from './lib/inject'
+import type { InjectionMethod, InjectionConfig } from './lib/inject'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -70,13 +70,32 @@ export function handleSubagentStop(sessionId: string, data: Record<string, unkno
   appendEvent(sessionId, `A ${Date.now()} ${charCount}`, logDir)
 
   const config = loadConfig(configPath)
+  const metrics = parseLog(sessionId, logDir)
+
+  // Context guard: proactive compaction injection (independent of bookmark)
+  if (config.contextGuard.enabled) {
+    const cg = config.contextGuard
+    if (metrics.cumulativeEstimatedTokens >= cg.compactThreshold) {
+      const compactCooldownMs = cg.compactCooldownSeconds * 1000
+      const timeSinceCompaction = Date.now() - metrics.lastCompactionAt
+      if (timeSinceCompaction >= compactCooldownMs) {
+        const sessionConfig = getSessionConfig(sessionId, sessionStateDir)
+        if (sessionConfig && sessionConfig.injectionMethod !== 'disabled') {
+          const injection: InjectionConfig = {
+            method: sessionConfig.injectionMethod as InjectionMethod,
+            target: sessionConfig.injectionTarget
+          }
+          requestCompaction(sessionId, injection, logDir)
+        }
+      }
+    }
+  }
 
   // Guard: bookmarks disabled globally (mirrors evaluateBookmark Guard 1)
   if (!config.bookmarks.enabled) {
     return false
   }
 
-  const metrics = parseLog(sessionId, logDir)
   const thresholds = config.bookmarks.thresholds
 
   // Evaluate ALL thresholds — SubagentStop may be the only hook that fires

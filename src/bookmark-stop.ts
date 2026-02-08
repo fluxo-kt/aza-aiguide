@@ -3,8 +3,8 @@ import { loadConfig } from './lib/config'
 import type { TavConfig } from './lib/config'
 import { parseLog, appendEvent, sanitizeSessionId, meetsAnyThreshold } from './lib/log'
 import type { LogMetrics } from './lib/log'
-import { buildInjectionCommand, spawnDetached } from './lib/inject'
-import type { InjectionMethod } from './lib/inject'
+import { buildInjectionCommand, spawnDetached, requestCompaction } from './lib/inject'
+import type { InjectionMethod, InjectionConfig } from './lib/inject'
 import { isContextLimitStop, isUserAbort } from './lib/guards'
 import { readStdin } from './lib/stdin'
 import { readFileSync } from 'fs'
@@ -111,6 +111,19 @@ async function main(): Promise<void> {
 
       if (command) {
         spawnDetached(command)
+      }
+    }
+
+    // Context guard: proactive compaction injection (independent of bookmark)
+    if (config.contextGuard.enabled && injectionMethod !== 'disabled') {
+      const cg = config.contextGuard
+      if (metrics.cumulativeEstimatedTokens >= cg.compactThreshold) {
+        const compactCooldownMs = cg.compactCooldownSeconds * 1000
+        const timeSinceCompaction = Date.now() - metrics.lastCompactionAt
+        if (timeSinceCompaction >= compactCooldownMs) {
+          const injection: InjectionConfig = { method: injectionMethod, target: injectionTarget }
+          requestCompaction(sessionId, injection)
+        }
       }
     }
 

@@ -1,4 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { mkdirSync, readFileSync, rmSync, existsSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import {
   isValidPaneId,
   sanitizeForShell,
@@ -8,7 +11,11 @@ import {
   detectInjectionMethod,
   buildInjectionCommand,
   spawnDetached,
-} from '../src/lib/inject';
+  requestBookmark,
+  requestCompaction,
+} from '../src/lib/inject'
+import type { InjectionConfig } from '../src/lib/inject'
+import { getLogPath } from '../src/lib/log'
 
 describe('inject utilities', () => {
   // Store original env values
@@ -301,4 +308,80 @@ describe('inject utilities', () => {
       }).not.toThrow();
     });
   });
+
+  describe('requestBookmark', () => {
+    let tempDir: string
+
+    beforeEach(() => {
+      tempDir = join(tmpdir(), `tav-inject-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      mkdirSync(tempDir, { recursive: true })
+    })
+
+    afterEach(() => {
+      if (existsSync(tempDir)) {
+        rmSync(tempDir, { recursive: true, force: true })
+      }
+    })
+
+    test('returns false when injection method is disabled', () => {
+      const injection: InjectionConfig = { method: 'disabled', target: '' }
+      const result = requestBookmark('test-session', injection, '·', tempDir)
+      expect(result).toBe(false)
+    })
+
+    test('appends I event to log and returns true for tmux', () => {
+      const injection: InjectionConfig = { method: 'tmux', target: '%99' }
+      const result = requestBookmark('test-session', injection, '·', tempDir)
+      expect(result).toBe(true)
+
+      const logContent = readFileSync(getLogPath('test-session', tempDir), 'utf-8')
+      expect(logContent).toMatch(/^I \d+\n$/)
+    })
+
+    test('does not write log when disabled', () => {
+      const injection: InjectionConfig = { method: 'disabled', target: '' }
+      requestBookmark('test-session', injection, '·', tempDir)
+
+      const logPath = getLogPath('test-session', tempDir)
+      expect(existsSync(logPath)).toBe(false)
+    })
+  })
+
+  describe('requestCompaction', () => {
+    let tempDir: string
+
+    beforeEach(() => {
+      tempDir = join(tmpdir(), `tav-inject-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      mkdirSync(tempDir, { recursive: true })
+    })
+
+    afterEach(() => {
+      if (existsSync(tempDir)) {
+        rmSync(tempDir, { recursive: true, force: true })
+      }
+    })
+
+    test('returns false when injection method is disabled', () => {
+      const injection: InjectionConfig = { method: 'disabled', target: '' }
+      const result = requestCompaction('test-session', injection, tempDir)
+      expect(result).toBe(false)
+    })
+
+    test('appends C event to log and returns true for tmux', () => {
+      const injection: InjectionConfig = { method: 'tmux', target: '%99' }
+      const result = requestCompaction('test-session', injection, tempDir)
+      expect(result).toBe(true)
+
+      const logContent = readFileSync(getLogPath('test-session', tempDir), 'utf-8')
+      expect(logContent).toMatch(/^C \d+\n$/)
+    })
+
+    test('does not write log when disabled', () => {
+      const injection: InjectionConfig = { method: 'disabled', target: '' }
+      requestCompaction('test-session', injection, tempDir)
+
+      const logPath = getLogPath('test-session', tempDir)
+      expect(existsSync(logPath)).toBe(false)
+    })
+  })
 });

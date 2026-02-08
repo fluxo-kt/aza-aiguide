@@ -10,9 +10,11 @@ function defaultMetrics(): LogMetrics {
     toolCalls: 0,
     agentReturns: 0,
     estimatedTokens: 0,
+    cumulativeEstimatedTokens: 0,
     elapsedSeconds: 0,
     lastInjectionAt: 0,
     lastBookmarkAt: 0,
+    lastCompactionAt: 0,
     lastLineIsBookmark: false
   }
 }

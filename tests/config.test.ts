@@ -161,5 +161,59 @@ describe('config loader', () => {
     expect(DEFAULT_CONFIG.bookmarks.thresholds.minSeconds).toBe(120)
     expect(DEFAULT_CONFIG.bookmarks.thresholds.agentBurstThreshold).toBe(3)
     expect(DEFAULT_CONFIG.bookmarks.thresholds.cooldownSeconds).toBe(25)
+    expect(DEFAULT_CONFIG.contextGuard.enabled).toBe(true)
+    expect(DEFAULT_CONFIG.contextGuard.compactThreshold).toBe(30000)
+    expect(DEFAULT_CONFIG.contextGuard.compactCooldownSeconds).toBe(120)
+    expect(DEFAULT_CONFIG.contextGuard.denyThreshold).toBe(45000)
+  })
+
+  test('loadConfig deep merges partial contextGuard config', () => {
+    writeFileSync(configPath, JSON.stringify({
+      contextGuard: { compactThreshold: 20000 }
+    }), 'utf-8')
+    const config = loadConfig(configPath)
+
+    // User override applied
+    expect(config.contextGuard.compactThreshold).toBe(20000)
+    // Missing fields fall back to defaults
+    expect(config.contextGuard.enabled).toBe(true)
+    expect(config.contextGuard.compactCooldownSeconds).toBe(120)
+    expect(config.contextGuard.denyThreshold).toBe(45000)
+  })
+
+  test('loadConfig validates contextGuard numeric fields', () => {
+    writeFileSync(configPath, JSON.stringify({
+      contextGuard: {
+        compactThreshold: 'banana',
+        compactCooldownSeconds: -10,
+        denyThreshold: null,
+      }
+    }), 'utf-8')
+    const config = loadConfig(configPath)
+
+    // All invalid values fall back to defaults
+    expect(config.contextGuard.compactThreshold).toBe(DEFAULT_CONFIG.contextGuard.compactThreshold)
+    expect(config.contextGuard.compactCooldownSeconds).toBe(DEFAULT_CONFIG.contextGuard.compactCooldownSeconds)
+    expect(config.contextGuard.denyThreshold).toBe(DEFAULT_CONFIG.contextGuard.denyThreshold)
+  })
+
+  test('loadConfig validates contextGuard enabled as boolean', () => {
+    writeFileSync(configPath, JSON.stringify({
+      contextGuard: { enabled: 'no' }
+    }), 'utf-8')
+    const config = loadConfig(configPath)
+
+    expect(config.contextGuard.enabled).toBe(true)
+    expect(typeof config.contextGuard.enabled).toBe('boolean')
+  })
+
+  test('loadConfig returns contextGuard defaults when section missing', () => {
+    writeFileSync(configPath, JSON.stringify({
+      bookmarks: { enabled: false }
+    }), 'utf-8')
+    const config = loadConfig(configPath)
+
+    // contextGuard section missing entirely — all defaults
+    expect(config.contextGuard).toEqual(DEFAULT_CONFIG.contextGuard)
   })
 })
