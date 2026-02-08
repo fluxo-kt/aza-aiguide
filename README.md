@@ -82,6 +82,61 @@ Partial configs are deep-merged with defaults — only specify what you want to 
 
 Set `"enabled": false` to disable bookmarks entirely without uninstalling.
 
+### Context Guard (Defence-in-Depth)
+
+Proactive context protection that prevents session death during parallel agent execution:
+
+```json
+{
+  "contextGuard": {
+    "enabled": true,
+    "contextWindowTokens": 200000,
+    "compactPercent": 0.76,
+    "denyPercent": 0.85,
+    "compactCooldownSeconds": 120,
+    "responseRatio": 0.25
+  }
+}
+```
+
+| Layer | Trigger | Action |
+|-------|---------|--------|
+| Compaction | Context pressure > 76% | Injects `/compact` via terminal (best-effort) |
+| Agent throttling | Context pressure > 85% | Denies new `Task` tool calls (deterministic) |
+
+`contextWindowTokens` must match your model's actual context window (200K for Sonnet, 1M for some models). No auto-detection is possible.
+
+### Session Location Verification (Opt-In)
+
+Prevents keystrokes from landing in the wrong terminal tab/pane. **Disabled by default** — enable only if you run multiple Claude Code sessions in different tabs.
+
+```json
+{
+  "sessionLocation": {
+    "enabled": true
+  }
+}
+```
+
+When enabled, tav captures your terminal location at session start (tmux pane ID, terminal app) and verifies it before each injection. If the location doesn't match (e.g. you switched tabs), injection is silently skipped.
+
+## Terminal Support
+
+| Terminal | Injection | Tab Verification | Notes |
+|----------|-----------|-----------------|-------|
+| **tmux** | Per-pane (`send-keys`) | N/A (pane-level) | Recommended. No focus required |
+| **GNU Screen** | Session-level (`stuff`) | N/A | No per-window targeting |
+| **iTerm2** | osascript | Planned | Requires Accessibility permissions |
+| **Terminal.app** | osascript | Planned | Requires Accessibility permissions |
+| **Warp** | osascript | Not supported | No tab API |
+| **Ghostty** | osascript | Not supported | New terminal, API unknown |
+| **VS Code** | osascript | Not supported | Electron, no AppleScript tab API |
+| **kitty** | osascript | Not supported | No AppleScript support |
+| **Alacritty** | osascript | Not supported | No AppleScript support |
+| **Hyper** | osascript | Not supported | Electron |
+
+All osascript terminals require macOS Accessibility permissions and terminal focus (frontmost app check).
+
 ## Known Issues & Limitations
 
 ### osascript Requires Terminal Focus (macOS)
@@ -121,7 +176,7 @@ rm -rf ~/.claude/tav/state/
 
 ```bash
 bun install
-bun test        # 149 tests
+bun test        # 316 tests
 bun run build   # compile dist/ for node fallback
 ```
 
