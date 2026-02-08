@@ -55,7 +55,7 @@ These three barriers make infinite loops **structurally impossible**.
 
 ```bash
 bun install              # dev deps only (typescript, @types/node, bun-types)
-bun test                 # 319 tests across 16 files
+bun test                 # 337 tests across 16 files
 bun run build            # tsc -p tsconfig.build.json → dist/
 bunx tsc --noEmit        # typecheck (includes tests)
 ```
@@ -237,7 +237,7 @@ bun run src/repair.ts <prefix> --dry-run          # Preview only
 bun run src/repair.ts <prefix> --interval 3       # Break every 3 assistant entries
 ```
 
-Creates `.tav-backup` before modifying. Inserts synthetic user messages (`·`) at break points (every N assistant entries, turn boundaries, time gaps). Repairs UUID chain. Validates integrity.
+Creates `.tav-backup` before modifying. Uses **chain-aware** insertion: `buildChain()` walks parentUuid from last entry backwards (the path CC's rewind UI follows), `findChainBreakPoints()` places breaks on the chain (every N assistant entries, turn boundaries, time gaps), and `insertChainBookmarks()` reparents chain successors. This ensures ALL bookmarks appear as rewind points — file order ≠ chain order due to sidechains and progress entries.
 
 **WARNING**: CC loading repaired JSONL as rewind points is UNVERIFIED. Always test on a non-critical session first.
 
