@@ -4,7 +4,7 @@ Defence-in-depth context protection for Claude Code sessions. Five layers preven
 
 ## Architecture
 
-**Hook pipeline** (6 scripts, 8 hook events):
+**Hook pipeline** (6 scripts, 7 hook events):
 
 | Hook Event | Script | Timeout | readStdin | Purpose |
 |------------|--------|---------|-----------|---------|
