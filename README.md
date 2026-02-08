@@ -49,7 +49,7 @@ Three independent barriers make infinite loops structurally impossible:
 
 ## Configuration
 
-Optional. tav works with sensible defaults out of the box. To customise, create `~/.claude/tav/config.json`:
+Optional. **All features are disabled by default.** To activate, create `~/.claude/tav/config.json` and enable what you need:
 
 ```json
 {
@@ -72,6 +72,7 @@ Partial configs are deep-merged with defaults — only specify what you want to 
 ```json
 {
   "bookmarks": {
+    "enabled": true,
     "thresholds": {
       "minToolCalls": 10,
       "cooldownSeconds": 60
@@ -80,11 +81,11 @@ Partial configs are deep-merged with defaults — only specify what you want to 
 }
 ```
 
-Set `"enabled": false` to disable bookmarks entirely without uninstalling.
+The repair tool and `/tav` skill commands work regardless of whether bookmarks are enabled.
 
 ### Context Guard (Defence-in-Depth)
 
-Proactive context protection that prevents session death during parallel agent execution:
+Proactive context protection that prevents session death during parallel agent execution. **Disabled by default** — enable explicitly:
 
 ```json
 {
