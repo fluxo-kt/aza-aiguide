@@ -617,12 +617,14 @@ describe('repair', () => {
 
     test('detects time gaps > 60 seconds on chain', () => {
       const now = Date.now()
+      // Break goes BEFORE the gap (at i-1) so bookmark's child is chain[i]
+      // With 2 entries: gap at i=1, break at i-1=0, child=chain[1] (assistant) ✓
       const chain = [
         { entry: makeEntry({ type: 'assistant', uuid: 'a1', timestamp: new Date(now).toISOString() }), fileIndex: 0 },
         { entry: makeEntry({ type: 'assistant', uuid: 'a2', timestamp: new Date(now + 120000).toISOString() }), fileIndex: 1 }
       ]
       const breaks = findChainBreakPoints(chain, 0, 100)
-      expect(breaks).toContain(1)
+      expect(breaks).toContain(0)
     })
 
     test('returns empty when chain is too short', () => {

@@ -249,7 +249,12 @@ export function buildChain(
 
 /**
  * Finds break points on the chain. Returns indices into the chain array.
- * Same criteria as findBreakPoints but operates on the actual conversation chain.
+ * Operates on the actual conversation chain (parentUuid path).
+ *
+ * CRITICAL: Break points MUST have an assistant entry as their successor
+ * (chain[breakIdx + 1].type === 'assistant'). CC's rewind UI only shows
+ * user entries that have an assistant child. Without this constraint,
+ * bookmarks inserted before tool-result user entries are invisible.
  */
 export function findChainBreakPoints(
   chain: ChainEntry[],
@@ -260,34 +265,66 @@ export function findChainBreakPoints(
   let assistantCount = 0
   let lastBreakChainIdx = -1
 
+  // Check if placing a break at position i would create a visible rewind point.
+  // The bookmark is inserted AFTER chain[i], so chain[i+1] becomes its child.
+  // CC requires the child to be an assistant entry.
+  function hasAssistantSuccessor(i: number): boolean {
+    return i + 1 < chain.length && chain[i + 1].entry.type === 'assistant'
+  }
+
+  // Find nearest valid break position at or after `from`.
+  // Scans forward — shift is typically 1-2 positions since the chain
+  // alternates assistant/user(tool-result)/assistant.
+  function findNearestValid(from: number): number {
+    for (let j = from; j < chain.length - 1; j++) {
+      if (hasAssistantSuccessor(j)) return j
+    }
+    return -1
+  }
+
   for (let i = 0; i < chain.length; i++) {
     if (chain[i].fileIndex < startFileIndex) continue
     const { entry } = chain[i]
 
     if (entry.type === 'assistant') assistantCount++
 
+    // Criterion 1: Every N assistant entries
     if (assistantCount >= interval && entry.type === 'assistant' && i > 0) {
-      breakPoints.push(i)
-      assistantCount = 0
-      lastBreakChainIdx = i
-    }
-
-    if (entry.type === 'system' && entry.subtype === 'turn_duration') {
-      if (lastBreakChainIdx < 0 || i > lastBreakChainIdx + 1) {
-        breakPoints.push(i)
+      const pos = findNearestValid(i)
+      if (pos >= 0 && (lastBreakChainIdx < 0 || pos > lastBreakChainIdx + 1)) {
+        breakPoints.push(pos)
         assistantCount = 0
-        lastBreakChainIdx = i
+        lastBreakChainIdx = pos
       }
     }
 
+    // Criterion 2: Turn duration markers (natural boundaries)
+    if (entry.type === 'system' && entry.subtype === 'turn_duration') {
+      if (lastBreakChainIdx < 0 || i > lastBreakChainIdx + 1) {
+        const pos = findNearestValid(i)
+        if (pos >= 0 && (lastBreakChainIdx < 0 || pos > lastBreakChainIdx + 1)) {
+          breakPoints.push(pos)
+          assistantCount = 0
+          lastBreakChainIdx = pos
+        }
+      }
+    }
+
+    // Criterion 3: Time gaps > 60 seconds
+    // Gap is between chain[i-1] and chain[i]. Break goes IN the gap (at i-1),
+    // so the bookmark is inserted after chain[i-1] and chain[i] becomes its child.
     if (i > 0 && chain[i - 1].fileIndex >= startFileIndex) {
       const prev = chain[i - 1].entry
       if (prev.timestamp && entry.timestamp) {
         const gap = new Date(entry.timestamp).getTime() - new Date(prev.timestamp).getTime()
-        if (gap > 60000 && (lastBreakChainIdx < 0 || i > lastBreakChainIdx + 1)) {
-          breakPoints.push(i)
-          assistantCount = 0
-          lastBreakChainIdx = i
+        if (gap > 60000 && (lastBreakChainIdx < 0 || i - 1 > lastBreakChainIdx + 1)) {
+          // Try before gap first, then after
+          const pos = findNearestValid(i - 1)
+          if (pos >= 0 && (lastBreakChainIdx < 0 || pos > lastBreakChainIdx + 1)) {
+            breakPoints.push(pos)
+            assistantCount = 0
+            lastBreakChainIdx = pos
+          }
         }
       }
     }
