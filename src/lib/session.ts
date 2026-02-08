@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'fs'
+import { readFileSync, writeFileSync, renameSync } from 'fs'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -60,11 +60,18 @@ export function readSessionConfig(sessionId: string, stateDir?: string): Session
 }
 
 /**
- * Writes session config to the state directory.
+ * Writes session config to the state directory using atomic write operation.
  * Ensures the state directory exists before writing.
+ * Uses write-to-temp + rename for atomicity (prevents partial writes on crash).
  */
 export function writeSessionConfig(sessionId: string, config: SessionConfig, stateDir?: string): void {
   ensureStateDir(stateDir)
   const path = sessionConfigPath(sessionId, stateDir)
-  writeFileSync(path, JSON.stringify(config, null, 2), 'utf-8')
+  const tmpPath = path + '.tmp'
+
+  // Write to temp file first
+  writeFileSync(tmpPath, JSON.stringify(config, null, 2), 'utf-8')
+
+  // Atomic rename (POSIX guarantees atomicity)
+  renameSync(tmpPath, path)
 }

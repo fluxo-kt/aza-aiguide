@@ -32,11 +32,16 @@ function readSessionConfig(sessionId, stateDir) {
     }
 }
 /**
- * Writes session config to the state directory.
+ * Writes session config to the state directory using atomic write operation.
  * Ensures the state directory exists before writing.
+ * Uses write-to-temp + rename for atomicity (prevents partial writes on crash).
  */
 function writeSessionConfig(sessionId, config, stateDir) {
     (0, log_1.ensureStateDir)(stateDir);
     const path = sessionConfigPath(sessionId, stateDir);
-    (0, fs_1.writeFileSync)(path, JSON.stringify(config, null, 2), 'utf-8');
+    const tmpPath = path + '.tmp';
+    // Write to temp file first
+    (0, fs_1.writeFileSync)(tmpPath, JSON.stringify(config, null, 2), 'utf-8');
+    // Atomic rename (POSIX guarantees atomicity)
+    (0, fs_1.renameSync)(tmpPath, path);
 }

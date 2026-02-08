@@ -29,6 +29,17 @@ async function main(): Promise<void> {
     // Load config
     const config: TavConfig = loadConfig()
 
+    // Write minimal config IMMEDIATELY (failure recovery point)
+    // If SessionStart crashes after this, downstream hooks have valid config to read
+    ensureStateDir()
+    const minimalConfig: SessionConfig = {
+      sessionId,
+      startedAt: Date.now(),
+      injectionMethod: 'detecting',
+      injectionTarget: ''
+    }
+    writeSessionConfig(sessionId, minimalConfig)
+
     // Only exit early when BOTH bookmarks AND contextGuard are disabled.
     // contextGuard needs jsonlPath even when bookmarks are off.
     if (config.bookmarks.enabled === false && config.contextGuard.enabled === false) {
@@ -59,35 +70,32 @@ async function main(): Promise<void> {
       }
     }
 
+    // Update config with injection method (incremental write #2)
+    let sessionConfig: SessionConfig = {
+      ...minimalConfig,
+      injectionMethod: injection.method,
+      injectionTarget: injection.target,
+      ...(disabledReason ? { disabledReason } : {})
+    }
+    writeSessionConfig(sessionId, sessionConfig)
+
+    // Resolve JSONL path for context pressure reading (cached for all hooks)
+    const jsonlPath = resolveJsonlPath(sessionId)
+    if (jsonlPath) {
+      sessionConfig = { ...sessionConfig, jsonlPath }
+      writeSessionConfig(sessionId, sessionConfig)
+    }
+
     // Detect session location (only if enabled in config)
-    let location: SessionLocation | undefined
     if (config.sessionLocation.enabled) {
       const detected = detectSessionLocation()
       if (detected) {
-        location = detected
+        sessionConfig = { ...sessionConfig, location: detected }
+        writeSessionConfig(sessionId, sessionConfig)
       } else {
         console.error('tav: Failed to detect session location (hostname/directory unavailable)')
       }
     }
-
-    // Ensure state directory exists
-    ensureStateDir()
-
-    // Resolve JSONL path for context pressure reading (cached for all hooks)
-    const jsonlPath = resolveJsonlPath(sessionId)
-
-    // Write session config via shared module
-    const sessionConfig: SessionConfig = {
-      sessionId,
-      injectionMethod: injection.method,
-      injectionTarget: injection.target,
-      startedAt: Date.now(),
-      ...(jsonlPath ? { jsonlPath } : {}),
-      ...(disabledReason ? { disabledReason } : {}),
-      ...(location ? { location } : {})
-    }
-
-    writeSessionConfig(sessionId, sessionConfig)
 
     // Create empty activity log (exclusive create — if a concurrent hook
     // already created it via appendEvent, don't truncate their data)

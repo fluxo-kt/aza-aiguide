@@ -17,6 +17,16 @@ async function main() {
         const sessionId = data.session_id || data.sessionId || 'unknown';
         // Load config
         const config = (0, config_1.loadConfig)();
+        // Write minimal config IMMEDIATELY (failure recovery point)
+        // If SessionStart crashes after this, downstream hooks have valid config to read
+        (0, log_1.ensureStateDir)();
+        const minimalConfig = {
+            sessionId,
+            startedAt: Date.now(),
+            injectionMethod: 'detecting',
+            injectionTarget: ''
+        };
+        (0, session_1.writeSessionConfig)(sessionId, minimalConfig);
         // Only exit early when BOTH bookmarks AND contextGuard are disabled.
         // contextGuard needs jsonlPath even when bookmarks are off.
         if (config.bookmarks.enabled === false && config.contextGuard.enabled === false) {
@@ -42,32 +52,31 @@ async function main() {
                     'Until then, you can still type \u00B7 manually to create bookmark anchor points.');
             }
         }
+        // Update config with injection method (incremental write #2)
+        let sessionConfig = {
+            ...minimalConfig,
+            injectionMethod: injection.method,
+            injectionTarget: injection.target,
+            ...(disabledReason ? { disabledReason } : {})
+        };
+        (0, session_1.writeSessionConfig)(sessionId, sessionConfig);
+        // Resolve JSONL path for context pressure reading (cached for all hooks)
+        const jsonlPath = (0, context_pressure_1.resolveJsonlPath)(sessionId);
+        if (jsonlPath) {
+            sessionConfig = { ...sessionConfig, jsonlPath };
+            (0, session_1.writeSessionConfig)(sessionId, sessionConfig);
+        }
         // Detect session location (only if enabled in config)
-        let location;
         if (config.sessionLocation.enabled) {
             const detected = (0, inject_1.detectSessionLocation)();
             if (detected) {
-                location = detected;
+                sessionConfig = { ...sessionConfig, location: detected };
+                (0, session_1.writeSessionConfig)(sessionId, sessionConfig);
             }
             else {
                 console.error('tav: Failed to detect session location (hostname/directory unavailable)');
             }
         }
-        // Ensure state directory exists
-        (0, log_1.ensureStateDir)();
-        // Resolve JSONL path for context pressure reading (cached for all hooks)
-        const jsonlPath = (0, context_pressure_1.resolveJsonlPath)(sessionId);
-        // Write session config via shared module
-        const sessionConfig = {
-            sessionId,
-            injectionMethod: injection.method,
-            injectionTarget: injection.target,
-            startedAt: Date.now(),
-            ...(jsonlPath ? { jsonlPath } : {}),
-            ...(disabledReason ? { disabledReason } : {}),
-            ...(location ? { location } : {})
-        };
-        (0, session_1.writeSessionConfig)(sessionId, sessionConfig);
         // Create empty activity log (exclusive create — if a concurrent hook
         // already created it via appendEvent, don't truncate their data)
         const logPath = (0, log_1.getLogPath)(sessionId);
