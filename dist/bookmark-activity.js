@@ -6,25 +6,9 @@ exports.handleSubagentStop = handleSubagentStop;
 const config_1 = require("./lib/config");
 const log_1 = require("./lib/log");
 const inject_1 = require("./lib/inject");
-const fs_1 = require("fs");
-const path_1 = require("path");
-const os_1 = require("os");
 const stdin_1 = require("./lib/stdin");
-function getSessionConfig(sessionId, stateDir) {
-    const dir = stateDir || (0, path_1.join)((0, os_1.homedir)(), '.claude', 'tav', 'state');
-    const sanitized = (0, log_1.sanitizeSessionId)(sessionId);
-    const path = (0, path_1.join)(dir, `${sanitized}.json`);
-    if (!(0, fs_1.existsSync)(path)) {
-        return null;
-    }
-    try {
-        const content = (0, fs_1.readFileSync)(path, 'utf-8');
-        return JSON.parse(content);
-    }
-    catch {
-        return null;
-    }
-}
+const session_1 = require("./lib/session");
+const evaluate_1 = require("./lib/evaluate");
 /**
  * Measures the size of a hook data field in characters.
  * Handles strings directly, serialises objects, and defaults to 0 for nullish values.
@@ -57,7 +41,7 @@ function handleSubagentStop(sessionId, data, logDir, sessionStateDir, configPath
             const compactCooldownMs = cg.compactCooldownSeconds * 1000;
             const timeSinceCompaction = Date.now() - metrics.lastCompactionAt;
             if (timeSinceCompaction >= compactCooldownMs) {
-                const sessionConfig = getSessionConfig(sessionId, sessionStateDir);
+                const sessionConfig = (0, session_1.readSessionConfig)(sessionId, sessionStateDir);
                 if (sessionConfig && sessionConfig.injectionMethod !== 'disabled') {
                     const injection = {
                         method: sessionConfig.injectionMethod,
@@ -68,31 +52,13 @@ function handleSubagentStop(sessionId, data, logDir, sessionStateDir, configPath
             }
         }
     }
-    // Guard: bookmarks disabled globally (mirrors evaluateBookmark Guard 1)
-    if (!config.bookmarks.enabled) {
-        return false;
-    }
-    const thresholds = config.bookmarks.thresholds;
-    // Evaluate ALL thresholds — SubagentStop may be the only hook that fires
-    // during long continuous turns where the Stop hook rarely triggers.
-    const { met } = (0, log_1.meetsAnyThreshold)(metrics, thresholds);
-    if (met) {
-        const cooldownMs = thresholds.cooldownSeconds * 1000;
-        const timeSinceLastAction = Date.now() - Math.max(metrics.lastInjectionAt, metrics.lastBookmarkAt);
-        if (timeSinceLastAction < cooldownMs) {
-            return false;
-        }
-        if (metrics.lastLineIsBookmark) {
-            return false;
-        }
-        const sessionConfig = getSessionConfig(sessionId, sessionStateDir);
-        if (!sessionConfig) {
-            return false;
-        }
-        const { injectionMethod, injectionTarget } = sessionConfig;
-        if (injectionMethod === 'disabled') {
-            return false;
-        }
+    // Read session config for injection details
+    const sessionConfig = (0, session_1.readSessionConfig)(sessionId, sessionStateDir);
+    const injectionMethod = sessionConfig?.injectionMethod ?? 'disabled';
+    // Unified evaluation — same guard ordering as Stop hook
+    const evaluation = (0, evaluate_1.shouldInjectBookmark)({ config, metrics, injectionMethod });
+    if (evaluation.shouldInject) {
+        const injectionTarget = sessionConfig?.injectionTarget ?? '';
         (0, log_1.appendEvent)(sessionId, `I ${Date.now()}`, logDir);
         const command = (0, inject_1.buildInjectionCommand)(injectionMethod, injectionTarget, config.bookmarks.marker);
         if (command) {

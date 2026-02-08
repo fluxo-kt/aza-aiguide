@@ -7,42 +7,24 @@ const log_1 = require("./lib/log");
 const inject_1 = require("./lib/inject");
 const guards_1 = require("./lib/guards");
 const stdin_1 = require("./lib/stdin");
-const fs_1 = require("fs");
-const path_1 = require("path");
-const os_1 = require("os");
+const session_1 = require("./lib/session");
+const evaluate_1 = require("./lib/evaluate");
 /**
  * Evaluates whether to inject a bookmark after Claude's turn ends.
+ * Stop-specific guards (contextLimitStop, userAbort) are checked here;
+ * common guards are delegated to shouldInjectBookmark.
  */
 function evaluateBookmark(data, config, metrics, injectionMethod) {
-    // Guard 1: Bookmarks disabled globally
-    if (!config.bookmarks.enabled) {
-        return { shouldInject: false, reason: 'bookmarks disabled in config' };
-    }
-    // Guard 2: Injection disabled for this session
-    if (injectionMethod === 'disabled') {
-        return { shouldInject: false, reason: 'injection method is disabled' };
-    }
-    // Guard 3: Context limit stop (let compaction happen)
+    // Stop-specific guard: context limit stop (let compaction happen)
     if ((0, guards_1.isContextLimitStop)(data)) {
         return { shouldInject: false, reason: 'context limit stop detected' };
     }
-    // Guard 4: User abort
+    // Stop-specific guard: user abort
     if ((0, guards_1.isUserAbort)(data)) {
         return { shouldInject: false, reason: 'user abort detected' };
     }
-    // Guard 5: Last line is already a bookmark
-    if (metrics.lastLineIsBookmark) {
-        return { shouldInject: false, reason: 'last line is already a bookmark' };
-    }
-    // Guard 6: Cooldown check
-    const lastActivityAt = Math.max(metrics.lastInjectionAt, metrics.lastBookmarkAt);
-    const cooldownMs = config.bookmarks.thresholds.cooldownSeconds * 1000;
-    if (Date.now() - lastActivityAt < cooldownMs) {
-        return { shouldInject: false, reason: 'within cooldown period' };
-    }
-    // Threshold evaluation (ANY threshold met triggers bookmark)
-    const { met, reason } = (0, log_1.meetsAnyThreshold)(metrics, config.bookmarks.thresholds);
-    return { shouldInject: met, reason };
+    // Common evaluation (enabled, disabled, lastLineIsBookmark, cooldown, thresholds)
+    return (0, evaluate_1.shouldInjectBookmark)({ config, metrics, injectionMethod });
 }
 /**
  * Main entry point
@@ -58,22 +40,14 @@ async function main() {
             console.log(JSON.stringify({ continue: true }));
             return;
         }
-        // Read session config
-        const sanitized = (0, log_1.sanitizeSessionId)(sessionId);
-        const sessionConfigPath = (0, path_1.join)((0, os_1.homedir)(), '.claude', 'tav', 'state', `${sanitized}.json`);
-        let injectionMethod = 'disabled';
-        let injectionTarget = '';
-        try {
-            const sessionConfigRaw = (0, fs_1.readFileSync)(sessionConfigPath, 'utf8');
-            const sessionConfig = JSON.parse(sessionConfigRaw);
-            injectionMethod = sessionConfig.injectionMethod || 'disabled';
-            injectionTarget = sessionConfig.injectionTarget || '';
-        }
-        catch {
-            // Session config missing or unreadable
+        // Read session config via shared module
+        const sessionConfig = (0, session_1.readSessionConfig)(sessionId);
+        if (!sessionConfig) {
             console.log(JSON.stringify({ continue: true }));
             return;
         }
+        const injectionMethod = (sessionConfig.injectionMethod || 'disabled');
+        const injectionTarget = sessionConfig.injectionTarget || '';
         // Parse log metrics
         const metrics = (0, log_1.parseLog)(sessionId);
         // Evaluate whether to inject bookmark

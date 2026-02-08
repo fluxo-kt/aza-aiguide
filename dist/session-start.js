@@ -2,12 +2,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs_1 = require("fs");
-const path_1 = require("path");
-const os_1 = require("os");
 const config_1 = require("./lib/config");
 const log_1 = require("./lib/log");
 const inject_1 = require("./lib/inject");
 const stdin_1 = require("./lib/stdin");
+const session_1 = require("./lib/session");
 async function main() {
     try {
         // Read stdin (3s timeout — SessionStart hook has 5s budget)
@@ -43,9 +42,7 @@ async function main() {
         }
         // Ensure state directory exists
         (0, log_1.ensureStateDir)();
-        // Sanitize session ID for filesystem
-        const sanitizedId = (0, log_1.sanitizeSessionId)(sessionId);
-        // Write session config
+        // Write session config via shared module
         const sessionConfig = {
             sessionId,
             injectionMethod: injection.method,
@@ -53,8 +50,7 @@ async function main() {
             startedAt: Date.now(),
             ...(disabledReason ? { disabledReason } : {})
         };
-        const sessionConfigPath = (0, path_1.join)((0, os_1.homedir)(), '.claude', 'tav', 'state', `${sanitizedId}.json`);
-        (0, fs_1.writeFileSync)(sessionConfigPath, JSON.stringify(sessionConfig, null, 2), 'utf-8');
+        (0, session_1.writeSessionConfig)(sessionId, sessionConfig);
         // Create empty activity log (exclusive create — if a concurrent hook
         // already created it via appendEvent, don't truncate their data)
         const logPath = (0, log_1.getLogPath)(sessionId);
