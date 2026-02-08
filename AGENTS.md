@@ -55,7 +55,7 @@ These three barriers make infinite loops **structurally impossible**.
 
 ```bash
 bun install              # dev deps only (typescript, @types/node, bun-types)
-bun test                 # 337 tests across 16 files
+bun test                 # 373 tests across 16 files
 bun run build            # tsc -p tsconfig.build.json → dist/
 bunx tsc --noEmit        # typecheck (includes tests)
 ```
@@ -237,7 +237,23 @@ bun run src/repair.ts <prefix> --dry-run          # Preview only
 bun run src/repair.ts <prefix> --interval 3       # Break every 3 assistant entries
 ```
 
-Creates `.tav-backup` before modifying. Uses **chain-aware** insertion: `buildChain()` walks parentUuid from last entry backwards (the path CC's rewind UI follows), `findChainBreakPoints()` places breaks on the chain (every N assistant entries, turn boundaries, time gaps), and `insertChainBookmarks()` reparents chain successors. This ensures ALL bookmarks appear as rewind points — file order ≠ chain order due to sidechains and progress entries.
+**Backup-first repair**: if `.tav-backup` exists, restores from it before re-repairing (idempotent). Never overwrites existing backup. Detects pre-existing bookmark markers to avoid duplication.
+
+Uses **chain-aware** insertion: `buildChain()` walks parentUuid from last entry backwards (the path CC's rewind UI follows), `findChainBreakPointsWithDeath()` places breaks on the chain with a **single validation gate** (`isValidRewindPoint()`), and `insertChainBookmarks()` reparents chain successors.
+
+**CC Rewind Point Requirements** (all 3 must be true for a bookmark to appear in CC's rewind dropdown):
+
+1. Entry is on the parentUuid chain (reachable from last entry)
+2. Next entry on chain is `type: 'assistant'`
+3. Assistant's `message.content` contains at least one `{type: 'text'}` block (thinking-only and tool_use-only responses are invisible to rewind UI)
+
+**Death Zone Detection** — an assistant entry is "dead" if ANY of these hold:
+
+- `model === "<synthetic>"` AND all token counts === 0 (CC's internal error response)
+- `message.content` text contains "Prompt is too long"
+- `isContextLimitStop()` matches stop_reason patterns (9 known context-limit patterns)
+
+`findDeathIndex()` returns the first dead assistant's chain index. Once death starts, it doesn't recover — all entries at or after this index are excluded. `findChainBreakPointsWithDeath()` returns `{ breakPoints, deathIndex, deadCount }` for reporting.
 
 **WARNING**: CC loading repaired JSONL as rewind points is UNVERIFIED. Always test on a non-critical session first.
 

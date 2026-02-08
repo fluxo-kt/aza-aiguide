@@ -14,10 +14,15 @@ import {
   repair,
   buildChain,
   findChainBreakPoints,
+  findChainBreakPointsWithDeath,
   insertChainBookmarks,
+  isDeadAssistant,
+  hasTextContentBlock,
+  findDeathIndex,
+  hasExistingBookmarks,
   DEFAULT_REPAIR_OPTIONS
 } from '../src/repair'
-import type { JournalEntry, SessionMetadata } from '../src/repair'
+import type { JournalEntry, SessionMetadata, ChainEntry } from '../src/repair'
 
 function createTestEnv() {
   const testDir = join(tmpdir(), `repair-test-${Date.now()}`)
@@ -34,7 +39,7 @@ function cleanup(testDir: string) {
 }
 
 function makeEntry(overrides: Partial<JournalEntry>): JournalEntry {
-  return {
+  const base: JournalEntry = {
     type: 'assistant',
     uuid: `uuid-${Math.random().toString(36).slice(2)}`,
     parentUuid: 'parent-0',
@@ -42,8 +47,12 @@ function makeEntry(overrides: Partial<JournalEntry>): JournalEntry {
     version: '1',
     cwd: '/test',
     timestamp: new Date().toISOString(),
+    // Default message with text content block — CC requires this for rewind visibility.
+    // Tests that need different content (tool_use-only, thinking-only, dead) override this.
+    message: { role: 'assistant', content: [{ type: 'text', text: 'Test response' }], usage: { input_tokens: 5000, output_tokens: 200 } },
     ...overrides
   }
+  return base
 }
 
 function makeUserEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
@@ -864,6 +873,535 @@ describe('repair', () => {
       // Sidechain entries should NOT be reparented
       const side51 = repairedEntries.find(e => e.entry?.uuid === 'side-5-1')
       expect(side51?.entry?.parentUuid).toBe('a5')
+    })
+  })
+
+  // --- Smart Bookmark Placement ---
+
+  describe('isDeadAssistant', () => {
+    test('detects "Prompt is too long" synthetic entry', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Prompt is too long' }],
+          usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+        }
+      })
+      // Also set model on entry level (as seen in real sessions)
+      ;(entry as Record<string, unknown>).model = '<synthetic>'
+      expect(isDeadAssistant(entry)).toBe(true)
+    })
+
+    test('detects synthetic model with zero tokens (no text match needed)', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Some other error' }],
+          usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+        }
+      })
+      ;(entry as Record<string, unknown>).model = '<synthetic>'
+      expect(isDeadAssistant(entry)).toBe(true)
+    })
+
+    test('detects "Prompt is too long" even without synthetic model', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Prompt is too long' }],
+          usage: { input_tokens: 100, output_tokens: 50 }
+        }
+      })
+      expect(isDeadAssistant(entry)).toBe(true)
+    })
+
+    test('detects context_limit stop_reason via isContextLimitStop', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'normal text' }] }
+      })
+      ;(entry as Record<string, unknown>).stop_reason = 'context_limit'
+      expect(isDeadAssistant(entry)).toBe(true)
+    })
+
+    test('does NOT flag normal assistant with real tokens', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Here is my response...' }],
+          usage: { input_tokens: 50000, output_tokens: 1500, cache_read_input_tokens: 100000 }
+        }
+      })
+      expect(isDeadAssistant(entry)).toBe(false)
+    })
+
+    test('does NOT flag non-assistant entries', () => {
+      const entry = makeEntry({ type: 'user', message: { role: 'user', content: 'hello' } })
+      expect(isDeadAssistant(entry)).toBe(false)
+    })
+
+    test('does NOT flag stop_sequence with non-zero tokens (legitimate stop)', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'output' }],
+          usage: { input_tokens: 5000, output_tokens: 200 }
+        }
+      })
+      ;(entry as Record<string, unknown>).stop_reason = 'stop_sequence'
+      expect(isDeadAssistant(entry)).toBe(false)
+    })
+
+    test('handles entry with no message', () => {
+      const entry = makeEntry({ type: 'assistant', message: undefined })
+      expect(isDeadAssistant(entry)).toBe(false)
+    })
+
+    test('detects "Prompt is too long" in string content', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: { role: 'assistant', content: 'Prompt is too long' }
+      })
+      expect(isDeadAssistant(entry)).toBe(true)
+    })
+
+    test('detects context_limit in message-level stop_reason', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] }
+      })
+      ;(entry.message as Record<string, unknown>).stop_reason = 'max_tokens'
+      expect(isDeadAssistant(entry)).toBe(true)
+    })
+  })
+
+  describe('hasTextContentBlock', () => {
+    test('returns true for array with text block', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Hello world' }] }
+      })
+      expect(hasTextContentBlock(entry)).toBe(true)
+    })
+
+    test('returns true for mixed content with text block', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'hmm...' },
+            { type: 'tool_use', id: 't1', name: 'Read', input: {} },
+            { type: 'text', text: 'Result here' }
+          ]
+        }
+      })
+      expect(hasTextContentBlock(entry)).toBe(true)
+    })
+
+    test('returns false for tool_use-only content', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }]
+        }
+      })
+      expect(hasTextContentBlock(entry)).toBe(false)
+    })
+
+    test('returns false for thinking-only content', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: 'Let me think about this...' }]
+        }
+      })
+      expect(hasTextContentBlock(entry)).toBe(false)
+    })
+
+    test('returns true for string content', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: { role: 'assistant', content: 'Hello' }
+      })
+      expect(hasTextContentBlock(entry)).toBe(true)
+    })
+
+    test('returns false for empty string content', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: { role: 'assistant', content: '' }
+      })
+      expect(hasTextContentBlock(entry)).toBe(false)
+    })
+
+    test('returns false for null content', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: { role: 'assistant', content: null }
+      })
+      expect(hasTextContentBlock(entry)).toBe(false)
+    })
+
+    test('returns false for undefined message', () => {
+      const entry = makeEntry({ type: 'assistant', message: undefined })
+      expect(hasTextContentBlock(entry)).toBe(false)
+    })
+
+    test('returns false for text block with empty/whitespace text', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '   ' }]
+        }
+      })
+      expect(hasTextContentBlock(entry)).toBe(false)
+    })
+
+    test('returns false for text block with no text field', () => {
+      const entry = makeEntry({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text' }]
+        }
+      })
+      expect(hasTextContentBlock(entry)).toBe(false)
+    })
+  })
+
+  describe('findDeathIndex', () => {
+    function chainOf(...types: Array<'live' | 'dead' | 'user' | 'tool_use_only'>): ChainEntry[] {
+      const now = Date.now()
+      return types.map((t, i) => {
+        if (t === 'user') {
+          return {
+            entry: makeUserEntry({ uuid: `u-${i}`, timestamp: new Date(now + i * 1000).toISOString() }),
+            fileIndex: i
+          }
+        }
+        if (t === 'tool_use_only') {
+          return {
+            entry: makeEntry({
+              type: 'assistant',
+              uuid: `a-${i}`,
+              timestamp: new Date(now + i * 1000).toISOString(),
+              message: { role: 'assistant', content: [{ type: 'tool_use', id: 'x', name: 'Y', input: {} }] }
+            }),
+            fileIndex: i
+          }
+        }
+        const entry = makeEntry({
+          type: 'assistant',
+          uuid: `a-${i}`,
+          timestamp: new Date(now + i * 1000).toISOString(),
+          message: t === 'dead'
+            ? {
+                role: 'assistant',
+                content: [{ type: 'text', text: 'Prompt is too long' }],
+                usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+              }
+            : {
+                role: 'assistant',
+                content: [{ type: 'text', text: 'Normal response' }],
+                usage: { input_tokens: 50000, output_tokens: 1500 }
+              }
+        })
+        if (t === 'dead') (entry as Record<string, unknown>).model = '<synthetic>'
+        return { entry, fileIndex: i }
+      })
+    }
+
+    test('returns chain.length when no death found', () => {
+      const chain = chainOf('user', 'live', 'live', 'live')
+      expect(findDeathIndex(chain)).toBe(chain.length)
+    })
+
+    test('returns index of first dead assistant', () => {
+      const chain = chainOf('user', 'live', 'live', 'dead', 'dead', 'dead')
+      expect(findDeathIndex(chain)).toBe(3)
+    })
+
+    test('handles chain starting with death', () => {
+      const chain = chainOf('dead', 'dead', 'dead')
+      expect(findDeathIndex(chain)).toBe(0)
+    })
+
+    test('skips non-assistant entries (user, system)', () => {
+      const chain = chainOf('user', 'live', 'user', 'dead')
+      expect(findDeathIndex(chain)).toBe(3)
+    })
+
+    test('handles empty chain', () => {
+      expect(findDeathIndex([])).toBe(0)
+    })
+
+    test('tool_use-only entries are NOT dead (just invisible)', () => {
+      const chain = chainOf('user', 'tool_use_only', 'live')
+      expect(findDeathIndex(chain)).toBe(chain.length)
+    })
+  })
+
+  describe('findChainBreakPointsWithDeath', () => {
+    function makeTextAssistant(uuid: string, parentUuid: string, ts: string): ChainEntry {
+      return {
+        entry: makeEntry({
+          type: 'assistant', uuid, parentUuid, timestamp: ts,
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Response' }], usage: { input_tokens: 5000, output_tokens: 200 } }
+        }),
+        fileIndex: 0 // will be set below
+      }
+    }
+
+    function makeDeadAssistantEntry(uuid: string, parentUuid: string, ts: string): ChainEntry {
+      const entry = makeEntry({
+        type: 'assistant', uuid, parentUuid, timestamp: ts,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Prompt is too long' }],
+          usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+        }
+      })
+      ;(entry as Record<string, unknown>).model = '<synthetic>'
+      return { entry, fileIndex: 0 }
+    }
+
+    function makeToolUseAssistant(uuid: string, parentUuid: string, ts: string): ChainEntry {
+      return {
+        entry: makeEntry({
+          type: 'assistant', uuid, parentUuid, timestamp: ts,
+          message: { role: 'assistant', content: [{ type: 'tool_use', id: 'x', name: 'Y', input: {} }] }
+        }),
+        fileIndex: 0
+      }
+    }
+
+    test('excludes bookmarks in death zone', () => {
+      const now = Date.now()
+      // Build chain: user, 3 live assistants, 3 dead assistants
+      const chain: ChainEntry[] = [
+        { entry: makeUserEntry({ uuid: 'u0', parentUuid: undefined, timestamp: new Date(now).toISOString() }), fileIndex: 0 },
+        makeTextAssistant('a1', 'u0', new Date(now + 1000).toISOString()),
+        makeTextAssistant('a2', 'a1', new Date(now + 2000).toISOString()),
+        makeTextAssistant('a3', 'a2', new Date(now + 3000).toISOString()),
+        makeDeadAssistantEntry('d1', 'a3', new Date(now + 4000).toISOString()),
+        makeDeadAssistantEntry('d2', 'd1', new Date(now + 5000).toISOString()),
+        makeDeadAssistantEntry('d3', 'd2', new Date(now + 6000).toISOString()),
+      ]
+      chain.forEach((c, i) => c.fileIndex = i)
+
+      const result = findChainBreakPointsWithDeath(chain, 0, 1)
+
+      // Death at index 4, so only chain[0..3] is valid
+      expect(result.deathIndex).toBe(4)
+      expect(result.deadCount).toBe(3)
+      // All break points must be < 4 (before death zone)
+      for (const bp of result.breakPoints) {
+        expect(bp).toBeLessThan(4)
+      }
+      // Successor of each break point must be a live text assistant
+      for (const bp of result.breakPoints) {
+        expect(chain[bp + 1].entry.type).toBe('assistant')
+        expect(hasTextContentBlock(chain[bp + 1].entry)).toBe(true)
+        expect(isDeadAssistant(chain[bp + 1].entry)).toBe(false)
+      }
+    })
+
+    test('all dead chain produces 0 break points', () => {
+      const now = Date.now()
+      const chain: ChainEntry[] = [
+        { entry: makeUserEntry({ uuid: 'u0', parentUuid: undefined, timestamp: new Date(now).toISOString() }), fileIndex: 0 },
+        makeDeadAssistantEntry('d1', 'u0', new Date(now + 1000).toISOString()),
+        makeDeadAssistantEntry('d2', 'd1', new Date(now + 2000).toISOString()),
+      ]
+      chain.forEach((c, i) => c.fileIndex = i)
+
+      const result = findChainBreakPointsWithDeath(chain, 0, 1)
+      expect(result.breakPoints.length).toBe(0)
+      expect(result.deathIndex).toBe(1)
+      expect(result.deadCount).toBe(2)
+    })
+
+    test('skips tool_use-only assistant successors (invisible in CC)', () => {
+      const now = Date.now()
+      const chain: ChainEntry[] = [
+        { entry: makeUserEntry({ uuid: 'u0', parentUuid: undefined, timestamp: new Date(now).toISOString() }), fileIndex: 0 },
+        makeToolUseAssistant('t1', 'u0', new Date(now + 1000).toISOString()),
+        makeTextAssistant('a1', 't1', new Date(now + 2000).toISOString()),
+        makeTextAssistant('a2', 'a1', new Date(now + 3000).toISOString()),
+      ]
+      chain.forEach((c, i) => c.fileIndex = i)
+
+      const result = findChainBreakPointsWithDeath(chain, 0, 1)
+      // Break at chain[0] would have successor t1 (tool_use-only) — invalid
+      // Break at chain[1] has successor a1 (text) — valid
+      // No break at chain[0] should exist
+      for (const bp of result.breakPoints) {
+        expect(hasTextContentBlock(chain[bp + 1].entry)).toBe(true)
+      }
+    })
+
+    test('no death means entire chain is valid', () => {
+      const now = Date.now()
+      const chain: ChainEntry[] = [
+        { entry: makeUserEntry({ uuid: 'u0', parentUuid: undefined, timestamp: new Date(now).toISOString() }), fileIndex: 0 },
+        makeTextAssistant('a1', 'u0', new Date(now + 1000).toISOString()),
+        makeTextAssistant('a2', 'a1', new Date(now + 2000).toISOString()),
+        makeTextAssistant('a3', 'a2', new Date(now + 3000).toISOString()),
+        makeTextAssistant('a4', 'a3', new Date(now + 4000).toISOString()),
+        makeTextAssistant('a5', 'a4', new Date(now + 5000).toISOString()),
+      ]
+      chain.forEach((c, i) => c.fileIndex = i)
+
+      const result = findChainBreakPointsWithDeath(chain, 0, 1)
+      expect(result.deathIndex).toBe(chain.length)
+      expect(result.deadCount).toBe(0)
+      expect(result.breakPoints.length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('hasExistingBookmarks', () => {
+    test('detects existing bookmark markers', () => {
+      const entries = [
+        { entry: makeUserEntry({ uuid: 'u0' }) },
+        { entry: makeUserEntry({ uuid: 'bm', message: { role: 'user', content: '·' }, userType: 'external' }) },
+        { entry: makeEntry({ uuid: 'a1' }) }
+      ]
+      expect(hasExistingBookmarks(entries, '·')).toBe(true)
+    })
+
+    test('returns false when no bookmarks exist', () => {
+      const entries = [
+        { entry: makeUserEntry({ uuid: 'u0' }) },
+        { entry: makeEntry({ uuid: 'a1' }) }
+      ]
+      expect(hasExistingBookmarks(entries, '·')).toBe(false)
+    })
+
+    test('does not match non-external user entries', () => {
+      const entries = [
+        { entry: makeEntry({ type: 'user', uuid: 'x', message: { role: 'user', content: '·' }, userType: 'internal' }) }
+      ]
+      expect(hasExistingBookmarks(entries, '·')).toBe(false)
+    })
+  })
+
+  describe('repair (backup-first behaviour)', () => {
+    test('restores from backup before re-repairing', () => {
+      const now = Date.now()
+      const entries: JournalEntry[] = [
+        makeUserEntry({ uuid: 'u0', sessionId: 's', version: '1', cwd: '/p', timestamp: new Date(now).toISOString() })
+      ]
+      for (let i = 1; i <= 10; i++) {
+        entries.push(makeEntry({
+          uuid: `a${i}`,
+          parentUuid: i === 1 ? 'u0' : `a${i - 1}`,
+          timestamp: new Date(now + i * 1000).toISOString(),
+          message: { role: 'assistant', content: [{ type: 'text', text: `Response ${i}` }], usage: { input_tokens: 5000, output_tokens: 200 } }
+        }))
+      }
+
+      const filePath = join(testDir, 'backup-first.jsonl')
+      const originalContent = entriesToJSONL(entries)
+      writeFileSync(filePath, originalContent)
+
+      // First repair
+      const result1 = repair(filePath, { ...DEFAULT_REPAIR_OPTIONS, interval: 3 })
+      expect(result1.errors.length).toBe(0)
+      expect(result1.inserted).toBeGreaterThan(0)
+      // Verify first repair actually modified the file
+      const firstRepairContent = readFileSync(filePath, 'utf-8')
+      expect(firstRepairContent).not.toBe(originalContent)
+
+      // Second repair — should restore from backup first, then re-repair
+      const result2 = repair(filePath, { ...DEFAULT_REPAIR_OPTIONS, interval: 3 })
+      expect(result2.errors.length).toBe(0)
+      // Should have same number of insertions (working from same pristine backup)
+      expect(result2.inserted).toBe(result1.inserted)
+
+      // Verify backup was NOT overwritten (still matches original)
+      const backupContent = readFileSync(`${filePath}.tav-backup`, 'utf-8')
+      expect(backupContent).toBe(originalContent)
+    })
+
+    test('does not overwrite existing backup', () => {
+      const now = Date.now()
+      const entries: JournalEntry[] = [
+        makeUserEntry({ uuid: 'u0', sessionId: 's', version: '1', cwd: '/p', timestamp: new Date(now).toISOString() })
+      ]
+      for (let i = 1; i <= 5; i++) {
+        entries.push(makeEntry({
+          uuid: `a${i}`,
+          parentUuid: i === 1 ? 'u0' : `a${i - 1}`,
+          timestamp: new Date(now + i * 1000).toISOString(),
+          message: { role: 'assistant', content: [{ type: 'text', text: `R${i}` }], usage: { input_tokens: 5000, output_tokens: 200 } }
+        }))
+      }
+
+      const filePath = join(testDir, 'no-overwrite.jsonl')
+      const originalContent = entriesToJSONL(entries)
+      writeFileSync(filePath, originalContent)
+
+      // Create a pre-existing backup with known content
+      const backupPath = `${filePath}.tav-backup`
+      const sentinelContent = 'SENTINEL_BACKUP_CONTENT\n'
+      writeFileSync(backupPath, sentinelContent)
+
+      // Repair restores from backup (sentinel) — parsing fails on invalid JSONL
+      repair(filePath, DEFAULT_REPAIR_OPTIONS)
+      // Backup should still be sentinel (not overwritten)
+      expect(readFileSync(backupPath, 'utf-8')).toBe(sentinelContent)
+    })
+
+    test('reports death zone in result', () => {
+      const now = Date.now()
+      const entries: JournalEntry[] = [
+        makeUserEntry({ uuid: 'u0', sessionId: 's', version: '1', cwd: '/p', timestamp: new Date(now).toISOString() })
+      ]
+
+      // 3 live assistants with text
+      for (let i = 1; i <= 3; i++) {
+        entries.push(makeEntry({
+          uuid: `a${i}`,
+          parentUuid: i === 1 ? 'u0' : `a${i - 1}`,
+          timestamp: new Date(now + i * 1000).toISOString(),
+          message: { role: 'assistant', content: [{ type: 'text', text: `Response ${i}` }], usage: { input_tokens: 50000, output_tokens: 1500 } }
+        }))
+      }
+
+      // 3 dead assistants
+      for (let i = 4; i <= 6; i++) {
+        const deadEntry = makeEntry({
+          uuid: `d${i}`,
+          parentUuid: i === 4 ? 'a3' : `d${i - 1}`,
+          timestamp: new Date(now + i * 1000).toISOString(),
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Prompt is too long' }],
+            usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+          }
+        })
+        ;(deadEntry as Record<string, unknown>).model = '<synthetic>'
+        entries.push(deadEntry)
+      }
+
+      const filePath = join(testDir, 'death-report.jsonl')
+      writeFileSync(filePath, entriesToJSONL(entries))
+
+      const result = repair(filePath, { ...DEFAULT_REPAIR_OPTIONS, dryRun: true })
+
+      expect(result.deathIndex).toBeDefined()
+      expect(result.deadCount).toBe(3)
+      // Should have a warning about death zone
+      expect(result.warnings.some(w => w.includes('Death zone'))).toBe(true)
     })
   })
 })

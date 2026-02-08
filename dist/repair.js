@@ -4,15 +4,20 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_REPAIR_OPTIONS = exports.parseJSONL = void 0;
 exports.resolveSessionFiles = resolveSessionFiles;
 exports.extractMetadata = extractMetadata;
+exports.isDeadAssistant = isDeadAssistant;
+exports.hasTextContentBlock = hasTextContentBlock;
+exports.findDeathIndex = findDeathIndex;
 exports.findBreakPoints = findBreakPoints;
 exports.findLastCompactBoundary = findLastCompactBoundary;
 exports.buildChain = buildChain;
 exports.findChainBreakPoints = findChainBreakPoints;
+exports.findChainBreakPointsWithDeath = findChainBreakPointsWithDeath;
 exports.insertChainBookmarks = insertChainBookmarks;
 exports.createSyntheticEntry = createSyntheticEntry;
 exports.midpointTimestamp = midpointTimestamp;
 exports.validate = validate;
 exports.insertBookmarks = insertBookmarks;
+exports.hasExistingBookmarks = hasExistingBookmarks;
 exports.repair = repair;
 exports.listSessions = listSessions;
 const fs_1 = require("fs");
@@ -23,6 +28,7 @@ const crypto_1 = require("crypto");
 var jsonl_types_1 = require("./lib/jsonl-types");
 Object.defineProperty(exports, "parseJSONL", { enumerable: true, get: function () { return jsonl_types_1.parseJSONL; } });
 const jsonl_types_2 = require("./lib/jsonl-types");
+const guards_1 = require("./lib/guards");
 exports.DEFAULT_REPAIR_OPTIONS = {
     interval: 1,
     dryRun: false,
@@ -104,6 +110,114 @@ function extractMetadata(entries) {
         }
     }
     return null;
+}
+// --- Death Detection & Content Validation ---
+/**
+ * Checks if an assistant entry represents a "dead" response.
+ * Dead entries indicate the session hit a terminal failure state (context exhausted).
+ *
+ * Three independent signals (any one = dead):
+ * 1. model === "<synthetic>" with all-zero token counts — CC's synthetic error pattern
+ * 2. Text content contains "Prompt is too long" — the actual error message
+ * 3. isContextLimitStop() matches stop_reason/end_turn_reason patterns
+ *
+ * Defence in depth: if CC changes any one pattern, the others still catch it.
+ */
+function isDeadAssistant(entry) {
+    if (entry.type !== 'assistant')
+        return false;
+    const message = entry.message;
+    if (!message)
+        return false;
+    // Signal 1: synthetic model with zero tokens
+    // model lives on entry or inside message (both accessed via index signature)
+    const model = entry.model ??
+        message.model;
+    if (model === '<synthetic>') {
+        const usage = message.usage;
+        if (usage) {
+            const totalTokens = (usage.input_tokens ?? 0) +
+                (usage.output_tokens ?? 0) +
+                (usage.cache_creation_input_tokens ?? 0) +
+                (usage.cache_read_input_tokens ?? 0);
+            if (totalTokens === 0)
+                return true;
+        }
+    }
+    // Signal 2: text content contains "Prompt is too long"
+    if (hasTextMatch(message.content, 'Prompt is too long'))
+        return true;
+    // Signal 3: stop_reason/end_turn_reason matches context limit patterns
+    const entryRecord = entry;
+    const messageRecord = message;
+    // isContextLimitStop checks stop_reason, stopReason, reason, end_turn_reason, endTurnReason
+    // Check both the entry-level and message-level fields
+    if ((0, guards_1.isContextLimitStop)(entryRecord))
+        return true;
+    if ((0, guards_1.isContextLimitStop)(messageRecord))
+        return true;
+    return false;
+}
+/**
+ * Checks whether the entry's message.content contains a text content block.
+ * CC's rewind UI only shows user entries whose assistant successor has at least
+ * one {type: 'text'} block in message.content. Tool_use-only and thinking-only
+ * responses are invisible in the rewind dropdown.
+ *
+ * Handles content polymorphism:
+ * - Array of blocks: looks for {type: 'text'} with non-empty text
+ * - String: non-empty string counts as text
+ * - null/undefined: no text
+ */
+function hasTextContentBlock(entry) {
+    const content = entry.message?.content;
+    if (content == null)
+        return false;
+    if (typeof content === 'string') {
+        return content.trim().length > 0;
+    }
+    if (Array.isArray(content)) {
+        return content.some((block) => {
+            if (typeof block !== 'object' || block === null)
+                return false;
+            const b = block;
+            return b.type === 'text' && typeof b.text === 'string' && b.text.trim().length > 0;
+        });
+    }
+    return false;
+}
+/**
+ * Finds the index of the first dead assistant entry on the chain.
+ * All entries at or after this index are in the "death zone" — session is
+ * irrecoverably exhausted, bookmarks placed here are useless.
+ *
+ * Key property: once death starts, it doesn't recover. "Prompt is too long"
+ * means context is maxed — subsequent entries cannot reduce it.
+ * This makes a forward scan with early return optimal.
+ *
+ * Returns chain.length if no death found (entire chain is live).
+ */
+function findDeathIndex(chain) {
+    for (let i = 0; i < chain.length; i++) {
+        if (isDeadAssistant(chain[i].entry))
+            return i;
+    }
+    return chain.length;
+}
+/** Helper: check if content (unknown type) contains a text match */
+function hasTextMatch(content, needle) {
+    if (typeof content === 'string') {
+        return content.includes(needle);
+    }
+    if (Array.isArray(content)) {
+        return content.some((block) => {
+            if (typeof block !== 'object' || block === null)
+                return false;
+            const b = block;
+            return b.type === 'text' && typeof b.text === 'string' && b.text.includes(needle);
+        });
+    }
+    return false;
 }
 // --- Break Point Detection ---
 /**
@@ -212,31 +326,46 @@ function buildChain(entries) {
     chain.reverse();
     return chain;
 }
-/**
- * Finds break points on the chain. Returns indices into the chain array.
- * Operates on the actual conversation chain (parentUuid path).
- *
- * CRITICAL: Break points MUST have an assistant entry as their successor
- * (chain[breakIdx + 1].type === 'assistant'). CC's rewind UI only shows
- * user entries that have an assistant child. Without this constraint,
- * bookmarks inserted before tool-result user entries are invisible.
- */
 function findChainBreakPoints(chain, startFileIndex, interval) {
+    return findChainBreakPointsWithDeath(chain, startFileIndex, interval).breakPoints;
+}
+function findChainBreakPointsWithDeath(chain, startFileIndex, interval) {
+    const deathIdx = findDeathIndex(chain);
+    const deadCount = deathIdx < chain.length
+        ? chain.slice(deathIdx).filter(c => isDeadAssistant(c.entry)).length
+        : 0;
     const breakPoints = [];
     let assistantCount = 0;
     let lastBreakChainIdx = -1;
-    // Check if placing a break at position i would create a visible rewind point.
-    // The bookmark is inserted AFTER chain[i], so chain[i+1] becomes its child.
-    // CC requires the child to be an assistant entry.
-    function hasAssistantSuccessor(i) {
-        return i + 1 < chain.length && chain[i + 1].entry.type === 'assistant';
+    // Single validation gate: checks ALL criteria for a valid rewind point.
+    // The bookmark is inserted AFTER chain[i], so chain[i+1] is the successor.
+    // All future CC requirements go into this ONE function.
+    function isValidRewindPoint(i) {
+        // 1. Must be before death zone (successor must also be before death)
+        if (i + 1 >= deathIdx)
+            return false;
+        // 2. Must have a successor on chain
+        if (i + 1 >= chain.length)
+            return false;
+        const successor = chain[i + 1].entry;
+        // 3. Successor must be an assistant
+        if (successor.type !== 'assistant')
+            return false;
+        // 4. Successor must have a text content block (CC requires this for visibility)
+        if (!hasTextContentBlock(successor))
+            return false;
+        // 5. Successor must not be dead (defence-in-depth: deathIdx should catch this,
+        //    but belt-and-braces in case of non-monotonic death)
+        if (isDeadAssistant(successor))
+            return false;
+        return true;
     }
     // Find nearest valid break position at or after `from`.
     // Scans forward — shift is typically 1-2 positions since the chain
     // alternates assistant/user(tool-result)/assistant.
     function findNearestValid(from) {
         for (let j = from; j < chain.length - 1; j++) {
-            if (hasAssistantSuccessor(j))
+            if (isValidRewindPoint(j))
                 return j;
         }
         return -1;
@@ -268,14 +397,11 @@ function findChainBreakPoints(chain, startFileIndex, interval) {
             }
         }
         // Criterion 3: Time gaps > 60 seconds
-        // Gap is between chain[i-1] and chain[i]. Break goes IN the gap (at i-1),
-        // so the bookmark is inserted after chain[i-1] and chain[i] becomes its child.
         if (i > 0 && chain[i - 1].fileIndex >= startFileIndex) {
             const prev = chain[i - 1].entry;
             if (prev.timestamp && entry.timestamp) {
                 const gap = new Date(entry.timestamp).getTime() - new Date(prev.timestamp).getTime();
                 if (gap > 60000 && (lastBreakChainIdx < 0 || i - 1 > lastBreakChainIdx + 1)) {
-                    // Try before gap first, then after
                     const pos = findNearestValid(i - 1);
                     if (pos >= 0 && (lastBreakChainIdx < 0 || pos > lastBreakChainIdx + 1)) {
                         breakPoints.push(pos);
@@ -286,7 +412,11 @@ function findChainBreakPoints(chain, startFileIndex, interval) {
             }
         }
     }
-    return [...new Set(breakPoints)].sort((a, b) => a - b);
+    return {
+        breakPoints: [...new Set(breakPoints)].sort((a, b) => a - b),
+        deathIndex: deathIdx,
+        deadCount
+    };
 }
 /**
  * Inserts bookmarks ON the chain. Two-phase approach:
@@ -451,8 +581,23 @@ function insertBookmarks(entries, breakPoints, metadata, marker) {
     return { result, inserted };
 }
 /**
+ * Checks if a JSONL already contains synthetic bookmark entries (marker content).
+ * Used to detect pre-existing repairs and avoid bookmark duplication.
+ */
+function hasExistingBookmarks(entries, marker) {
+    return entries.some(e => e.entry?.type === 'user' &&
+        e.entry?.message?.content === marker &&
+        e.entry?.userType === 'external');
+}
+/**
  * Main repair function. Orchestrates the full pipeline:
- * resolve → parse → backup → find breaks → insert → validate → write.
+ * restore-from-backup → parse → find breaks → insert → validate → write.
+ *
+ * Backup-first behaviour:
+ * - If .tav-backup exists, restore from it first (work from pristine original)
+ * - If no backup exists, create one before modifying
+ * - Never overwrite an existing backup
+ * - Detects pre-existing bookmarks to avoid duplication
  */
 function repair(filePath, options = exports.DEFAULT_REPAIR_OPTIONS) {
     const result = {
@@ -461,7 +606,20 @@ function repair(filePath, options = exports.DEFAULT_REPAIR_OPTIONS) {
         errors: [],
         warnings: []
     };
-    // Read file
+    const backupPath = `${filePath}.tav-backup`;
+    // Backup-first: if backup exists, restore from it to work from pristine original.
+    // This ensures re-running repair always starts clean (no duplicate bookmarks).
+    if (!options.dryRun && (0, fs_1.existsSync)(backupPath)) {
+        try {
+            (0, fs_1.copyFileSync)(backupPath, filePath);
+            result.warnings.push(`Restored from existing backup: ${backupPath}`);
+        }
+        catch (err) {
+            result.errors.push(`Cannot restore from backup: ${backupPath}`);
+            return result;
+        }
+    }
+    // Read file (possibly just restored from backup)
     let content;
     try {
         content = (0, fs_1.readFileSync)(filePath, 'utf-8');
@@ -475,6 +633,11 @@ function repair(filePath, options = exports.DEFAULT_REPAIR_OPTIONS) {
     if (entries.length === 0) {
         result.errors.push('File is empty');
         return result;
+    }
+    // Detect pre-existing bookmarks (safety net for edge cases)
+    if (hasExistingBookmarks(entries, options.marker)) {
+        result.warnings.push(`File already contains bookmark markers (${options.marker}). ` +
+            'Previous repair detected — restoring from backup is recommended.');
     }
     // Extract metadata
     const metadata = extractMetadata(entries);
@@ -491,10 +654,25 @@ function repair(filePath, options = exports.DEFAULT_REPAIR_OPTIONS) {
     // Find last compact_boundary to scope break points
     const lastCompactIdx = findLastCompactBoundary(entries);
     const startFileIndex = lastCompactIdx === -1 ? 0 : lastCompactIdx + 1;
-    // Find break points ON THE CHAIN (not file order)
-    const chainBreakPoints = findChainBreakPoints(chain, startFileIndex, options.interval);
+    // Find break points ON THE CHAIN with death zone detection
+    const { breakPoints: chainBreakPoints, deathIndex, deadCount } = findChainBreakPointsWithDeath(chain, startFileIndex, options.interval);
+    // Report death zone if detected
+    if (deathIndex < chain.length) {
+        result.deathIndex = deathIndex;
+        result.deadCount = deadCount;
+        result.warnings.push(`Death zone detected at chain[${deathIndex}]: ` +
+            `${deadCount} dead entries excluded. ` +
+            `Valid zone: chain[0..${deathIndex - 1}] (${deathIndex} entries)`);
+    }
     if (chainBreakPoints.length === 0) {
-        result.warnings.push('No break points found on chain — file may be too short or already well-segmented');
+        if (deathIndex < chain.length && deathIndex <= 1) {
+            result.warnings.push('No valid rewind points found — session died too early. ' +
+                'All assistant entries are in the death zone.');
+        }
+        else {
+            result.warnings.push('No valid rewind points found on chain — file may be too short, ' +
+                'already well-segmented, or all assistant successors lack text content blocks');
+        }
         return result;
     }
     // Dry run — report but don't modify
@@ -508,16 +686,17 @@ function repair(filePath, options = exports.DEFAULT_REPAIR_OPTIONS) {
         }
         return result;
     }
-    // Create backup
-    const backupPath = `${filePath}.tav-backup`;
-    try {
-        (0, fs_1.copyFileSync)(filePath, backupPath);
-        result.backupPath = backupPath;
+    // Create backup (only if none exists — never overwrite)
+    if (!(0, fs_1.existsSync)(backupPath)) {
+        try {
+            (0, fs_1.copyFileSync)(filePath, backupPath);
+        }
+        catch (err) {
+            result.errors.push(`Cannot create backup: ${backupPath}`);
+            return result;
+        }
     }
-    catch (err) {
-        result.errors.push(`Cannot create backup: ${backupPath}`);
-        return result;
-    }
+    result.backupPath = backupPath;
     // Insert bookmarks ON THE CHAIN (re-parents chain successors, not file-adjacent)
     const { result: modifiedEntries, inserted } = insertChainBookmarks(entries, chain, chainBreakPoints, metadata, options.marker);
     result.inserted = inserted;
@@ -715,9 +894,17 @@ async function main() {
     for (const warn of result.warnings) {
         console.log(`  ⚠ ${warn}`);
     }
-    if (result.inserted > 0 && result.errors.length === 0) {
+    if (result.errors.length === 0) {
         console.log('');
-        console.log(`Inserted ${result.inserted} rewind points.`);
+        if (result.deathIndex != null && result.deadCount != null) {
+            console.log(`Death zone: ${result.deadCount} dead entries excluded (from chain[${result.deathIndex}])`);
+        }
+        if (result.inserted > 0) {
+            console.log(`Inserted ${result.inserted} valid rewind points.`);
+        }
+        else {
+            console.log('No valid rewind points could be inserted.');
+        }
         if (result.backupPath) {
             console.log(`Backup: ${result.backupPath}`);
         }

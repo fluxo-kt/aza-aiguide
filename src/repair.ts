@@ -10,6 +10,7 @@ export { type JournalEntry, type ParsedLine, parseJSONL } from './lib/jsonl-type
 // Local imports for use within this file
 import type { JournalEntry } from './lib/jsonl-types'
 import { parseJSONL } from './lib/jsonl-types'
+import { isContextLimitStop } from './lib/guards'
 
 // --- Types ---
 
@@ -33,6 +34,8 @@ export interface RepairResult {
   backupPath: string | null
   errors: string[]
   warnings: string[]
+  deathIndex?: number   // Chain index of first dead assistant (if detected)
+  deadCount?: number    // Number of dead assistant entries excluded
 }
 
 export const DEFAULT_REPAIR_OPTIONS: RepairOptions = {
@@ -116,6 +119,119 @@ export function extractMetadata(entries: Array<{ entry: JournalEntry | null }>):
     }
   }
   return null
+}
+
+// --- Death Detection & Content Validation ---
+
+/**
+ * Checks if an assistant entry represents a "dead" response.
+ * Dead entries indicate the session hit a terminal failure state (context exhausted).
+ *
+ * Three independent signals (any one = dead):
+ * 1. model === "<synthetic>" with all-zero token counts — CC's synthetic error pattern
+ * 2. Text content contains "Prompt is too long" — the actual error message
+ * 3. isContextLimitStop() matches stop_reason/end_turn_reason patterns
+ *
+ * Defence in depth: if CC changes any one pattern, the others still catch it.
+ */
+export function isDeadAssistant(entry: JournalEntry): boolean {
+  if (entry.type !== 'assistant') return false
+
+  const message = entry.message
+  if (!message) return false
+
+  // Signal 1: synthetic model with zero tokens
+  // model lives on entry or inside message (both accessed via index signature)
+  const model = (entry as Record<string, unknown>).model ??
+    (message as Record<string, unknown>).model
+  if (model === '<synthetic>') {
+    const usage = message.usage
+    if (usage) {
+      const totalTokens = (usage.input_tokens ?? 0) +
+        (usage.output_tokens ?? 0) +
+        (usage.cache_creation_input_tokens ?? 0) +
+        (usage.cache_read_input_tokens ?? 0)
+      if (totalTokens === 0) return true
+    }
+  }
+
+  // Signal 2: text content contains "Prompt is too long"
+  if (hasTextMatch(message.content, 'Prompt is too long')) return true
+
+  // Signal 3: stop_reason/end_turn_reason matches context limit patterns
+  const entryRecord = entry as Record<string, unknown>
+  const messageRecord = message as Record<string, unknown>
+  // isContextLimitStop checks stop_reason, stopReason, reason, end_turn_reason, endTurnReason
+  // Check both the entry-level and message-level fields
+  if (isContextLimitStop(entryRecord)) return true
+  if (isContextLimitStop(messageRecord)) return true
+
+  return false
+}
+
+/**
+ * Checks whether the entry's message.content contains a text content block.
+ * CC's rewind UI only shows user entries whose assistant successor has at least
+ * one {type: 'text'} block in message.content. Tool_use-only and thinking-only
+ * responses are invisible in the rewind dropdown.
+ *
+ * Handles content polymorphism:
+ * - Array of blocks: looks for {type: 'text'} with non-empty text
+ * - String: non-empty string counts as text
+ * - null/undefined: no text
+ */
+export function hasTextContentBlock(entry: JournalEntry): boolean {
+  const content = entry.message?.content
+  if (content == null) return false
+
+  if (typeof content === 'string') {
+    return content.trim().length > 0
+  }
+
+  if (Array.isArray(content)) {
+    return content.some(
+      (block: unknown) => {
+        if (typeof block !== 'object' || block === null) return false
+        const b = block as Record<string, unknown>
+        return b.type === 'text' && typeof b.text === 'string' && b.text.trim().length > 0
+      }
+    )
+  }
+
+  return false
+}
+
+/**
+ * Finds the index of the first dead assistant entry on the chain.
+ * All entries at or after this index are in the "death zone" — session is
+ * irrecoverably exhausted, bookmarks placed here are useless.
+ *
+ * Key property: once death starts, it doesn't recover. "Prompt is too long"
+ * means context is maxed — subsequent entries cannot reduce it.
+ * This makes a forward scan with early return optimal.
+ *
+ * Returns chain.length if no death found (entire chain is live).
+ */
+export function findDeathIndex(chain: ChainEntry[]): number {
+  for (let i = 0; i < chain.length; i++) {
+    if (isDeadAssistant(chain[i].entry)) return i
+  }
+  return chain.length
+}
+
+/** Helper: check if content (unknown type) contains a text match */
+function hasTextMatch(content: unknown, needle: string): boolean {
+  if (typeof content === 'string') {
+    return content.includes(needle)
+  }
+  if (Array.isArray(content)) {
+    return content.some((block: unknown) => {
+      if (typeof block !== 'object' || block === null) return false
+      const b = block as Record<string, unknown>
+      return b.type === 'text' && typeof b.text === 'string' && b.text.includes(needle)
+    })
+  }
+  return false
 }
 
 // --- Break Point Detection ---
@@ -251,25 +367,66 @@ export function buildChain(
  * Finds break points on the chain. Returns indices into the chain array.
  * Operates on the actual conversation chain (parentUuid path).
  *
- * CRITICAL: Break points MUST have an assistant entry as their successor
- * (chain[breakIdx + 1].type === 'assistant'). CC's rewind UI only shows
- * user entries that have an assistant child. Without this constraint,
- * bookmarks inserted before tool-result user entries are invisible.
+ * Uses a SINGLE VALIDATION GATE (isValidRewindPoint) that checks ALL criteria
+ * for a bookmark to be both visible and useful in CC's rewind UI:
+ * 1. Before the death zone (session not yet exhausted)
+ * 2. Has an assistant successor on chain
+ * 3. Successor has a text content block (CC requires this for rewind visibility)
+ * 4. Successor is not a dead assistant (defence-in-depth)
+ *
+ * Also returns death zone metadata for reporting.
  */
+export interface ChainBreakResult {
+  breakPoints: number[]
+  deathIndex: number     // chain.length if no death
+  deadCount: number      // number of dead assistants excluded
+}
+
 export function findChainBreakPoints(
   chain: ChainEntry[],
   startFileIndex: number,
   interval: number
 ): number[] {
+  return findChainBreakPointsWithDeath(chain, startFileIndex, interval).breakPoints
+}
+
+export function findChainBreakPointsWithDeath(
+  chain: ChainEntry[],
+  startFileIndex: number,
+  interval: number
+): ChainBreakResult {
+  const deathIdx = findDeathIndex(chain)
+  const deadCount = deathIdx < chain.length
+    ? chain.slice(deathIdx).filter(c => isDeadAssistant(c.entry)).length
+    : 0
+
   const breakPoints: number[] = []
   let assistantCount = 0
   let lastBreakChainIdx = -1
 
-  // Check if placing a break at position i would create a visible rewind point.
-  // The bookmark is inserted AFTER chain[i], so chain[i+1] becomes its child.
-  // CC requires the child to be an assistant entry.
-  function hasAssistantSuccessor(i: number): boolean {
-    return i + 1 < chain.length && chain[i + 1].entry.type === 'assistant'
+  // Single validation gate: checks ALL criteria for a valid rewind point.
+  // The bookmark is inserted AFTER chain[i], so chain[i+1] is the successor.
+  // All future CC requirements go into this ONE function.
+  function isValidRewindPoint(i: number): boolean {
+    // 1. Must be before death zone (successor must also be before death)
+    if (i + 1 >= deathIdx) return false
+
+    // 2. Must have a successor on chain
+    if (i + 1 >= chain.length) return false
+
+    const successor = chain[i + 1].entry
+
+    // 3. Successor must be an assistant
+    if (successor.type !== 'assistant') return false
+
+    // 4. Successor must have a text content block (CC requires this for visibility)
+    if (!hasTextContentBlock(successor)) return false
+
+    // 5. Successor must not be dead (defence-in-depth: deathIdx should catch this,
+    //    but belt-and-braces in case of non-monotonic death)
+    if (isDeadAssistant(successor)) return false
+
+    return true
   }
 
   // Find nearest valid break position at or after `from`.
@@ -277,7 +434,7 @@ export function findChainBreakPoints(
   // alternates assistant/user(tool-result)/assistant.
   function findNearestValid(from: number): number {
     for (let j = from; j < chain.length - 1; j++) {
-      if (hasAssistantSuccessor(j)) return j
+      if (isValidRewindPoint(j)) return j
     }
     return -1
   }
@@ -311,14 +468,11 @@ export function findChainBreakPoints(
     }
 
     // Criterion 3: Time gaps > 60 seconds
-    // Gap is between chain[i-1] and chain[i]. Break goes IN the gap (at i-1),
-    // so the bookmark is inserted after chain[i-1] and chain[i] becomes its child.
     if (i > 0 && chain[i - 1].fileIndex >= startFileIndex) {
       const prev = chain[i - 1].entry
       if (prev.timestamp && entry.timestamp) {
         const gap = new Date(entry.timestamp).getTime() - new Date(prev.timestamp).getTime()
         if (gap > 60000 && (lastBreakChainIdx < 0 || i - 1 > lastBreakChainIdx + 1)) {
-          // Try before gap first, then after
           const pos = findNearestValid(i - 1)
           if (pos >= 0 && (lastBreakChainIdx < 0 || pos > lastBreakChainIdx + 1)) {
             breakPoints.push(pos)
@@ -330,7 +484,11 @@ export function findChainBreakPoints(
     }
   }
 
-  return [...new Set(breakPoints)].sort((a, b) => a - b)
+  return {
+    breakPoints: [...new Set(breakPoints)].sort((a, b) => a - b),
+    deathIndex: deathIdx,
+    deadCount
+  }
 }
 
 /**
@@ -535,8 +693,29 @@ export function insertBookmarks(
 }
 
 /**
+ * Checks if a JSONL already contains synthetic bookmark entries (marker content).
+ * Used to detect pre-existing repairs and avoid bookmark duplication.
+ */
+export function hasExistingBookmarks(
+  entries: Array<{ entry: JournalEntry | null }>,
+  marker: string
+): boolean {
+  return entries.some(e =>
+    e.entry?.type === 'user' &&
+    e.entry?.message?.content === marker &&
+    e.entry?.userType === 'external'
+  )
+}
+
+/**
  * Main repair function. Orchestrates the full pipeline:
- * resolve → parse → backup → find breaks → insert → validate → write.
+ * restore-from-backup → parse → find breaks → insert → validate → write.
+ *
+ * Backup-first behaviour:
+ * - If .tav-backup exists, restore from it first (work from pristine original)
+ * - If no backup exists, create one before modifying
+ * - Never overwrite an existing backup
+ * - Detects pre-existing bookmarks to avoid duplication
  */
 export function repair(
   filePath: string,
@@ -549,7 +728,21 @@ export function repair(
     warnings: []
   }
 
-  // Read file
+  const backupPath = `${filePath}.tav-backup`
+
+  // Backup-first: if backup exists, restore from it to work from pristine original.
+  // This ensures re-running repair always starts clean (no duplicate bookmarks).
+  if (!options.dryRun && existsSync(backupPath)) {
+    try {
+      copyFileSync(backupPath, filePath)
+      result.warnings.push(`Restored from existing backup: ${backupPath}`)
+    } catch (err) {
+      result.errors.push(`Cannot restore from backup: ${backupPath}`)
+      return result
+    }
+  }
+
+  // Read file (possibly just restored from backup)
   let content: string
   try {
     content = readFileSync(filePath, 'utf-8')
@@ -563,6 +756,14 @@ export function repair(
   if (entries.length === 0) {
     result.errors.push('File is empty')
     return result
+  }
+
+  // Detect pre-existing bookmarks (safety net for edge cases)
+  if (hasExistingBookmarks(entries, options.marker)) {
+    result.warnings.push(
+      `File already contains bookmark markers (${options.marker}). ` +
+      'Previous repair detected — restoring from backup is recommended.'
+    )
   }
 
   // Extract metadata
@@ -583,11 +784,33 @@ export function repair(
   const lastCompactIdx = findLastCompactBoundary(entries)
   const startFileIndex = lastCompactIdx === -1 ? 0 : lastCompactIdx + 1
 
-  // Find break points ON THE CHAIN (not file order)
-  const chainBreakPoints = findChainBreakPoints(chain, startFileIndex, options.interval)
+  // Find break points ON THE CHAIN with death zone detection
+  const { breakPoints: chainBreakPoints, deathIndex, deadCount } =
+    findChainBreakPointsWithDeath(chain, startFileIndex, options.interval)
+
+  // Report death zone if detected
+  if (deathIndex < chain.length) {
+    result.deathIndex = deathIndex
+    result.deadCount = deadCount
+    result.warnings.push(
+      `Death zone detected at chain[${deathIndex}]: ` +
+      `${deadCount} dead entries excluded. ` +
+      `Valid zone: chain[0..${deathIndex - 1}] (${deathIndex} entries)`
+    )
+  }
 
   if (chainBreakPoints.length === 0) {
-    result.warnings.push('No break points found on chain — file may be too short or already well-segmented')
+    if (deathIndex < chain.length && deathIndex <= 1) {
+      result.warnings.push(
+        'No valid rewind points found — session died too early. ' +
+        'All assistant entries are in the death zone.'
+      )
+    } else {
+      result.warnings.push(
+        'No valid rewind points found on chain — file may be too short, ' +
+        'already well-segmented, or all assistant successors lack text content blocks'
+      )
+    }
     return result
   }
 
@@ -603,15 +826,16 @@ export function repair(
     return result
   }
 
-  // Create backup
-  const backupPath = `${filePath}.tav-backup`
-  try {
-    copyFileSync(filePath, backupPath)
-    result.backupPath = backupPath
-  } catch (err) {
-    result.errors.push(`Cannot create backup: ${backupPath}`)
-    return result
+  // Create backup (only if none exists — never overwrite)
+  if (!existsSync(backupPath)) {
+    try {
+      copyFileSync(filePath, backupPath)
+    } catch (err) {
+      result.errors.push(`Cannot create backup: ${backupPath}`)
+      return result
+    }
   }
+  result.backupPath = backupPath
 
   // Insert bookmarks ON THE CHAIN (re-parents chain successors, not file-adjacent)
   const { result: modifiedEntries, inserted } = insertChainBookmarks(
@@ -848,9 +1072,16 @@ async function main(): Promise<void> {
     console.log(`  ⚠ ${warn}`)
   }
 
-  if (result.inserted > 0 && result.errors.length === 0) {
+  if (result.errors.length === 0) {
     console.log('')
-    console.log(`Inserted ${result.inserted} rewind points.`)
+    if (result.deathIndex != null && result.deadCount != null) {
+      console.log(`Death zone: ${result.deadCount} dead entries excluded (from chain[${result.deathIndex}])`)
+    }
+    if (result.inserted > 0) {
+      console.log(`Inserted ${result.inserted} valid rewind points.`)
+    } else {
+      console.log('No valid rewind points could be inserted.')
+    }
     if (result.backupPath) {
       console.log(`Backup: ${result.backupPath}`)
     }
