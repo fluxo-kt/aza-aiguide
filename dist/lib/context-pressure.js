@@ -46,7 +46,8 @@ function readLastAssistantUsage(jsonlPath, chunkSize = 65536) {
         if (lines.length < minLines)
             return null;
         const validLines = lines.slice(startSlice, -1);
-        // Scan backwards for last assistant entry with usage data
+        // Collect ALL assistant entries with timestamps to find the most recent
+        const assistantEntries = [];
         for (let i = validLines.length - 1; i >= 0; i--) {
             const line = validLines[i].trim();
             if (!line)
@@ -66,14 +67,21 @@ function readLastAssistantUsage(jsonlPath, chunkSize = 65536) {
                 const cacheCreation = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
                 const cacheRead = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
                 const total = inputTokens + cacheCreation + cacheRead;
-                return total > 0 ? total : null;
+                if (total > 0) {
+                    const timestamp = typeof entry.timestamp === 'number' ? entry.timestamp : 0;
+                    assistantEntries.push({ timestamp, total });
+                }
             }
             catch {
                 // Malformed JSON — skip this line, try next
                 continue;
             }
         }
-        return null;
+        // Return entry with highest timestamp (most recent)
+        if (assistantEntries.length === 0)
+            return null;
+        assistantEntries.sort((a, b) => b.timestamp - a.timestamp);
+        return assistantEntries[0].total;
     }
     catch {
         return null;
