@@ -87,6 +87,52 @@ describe('session', () => {
     expect(result).toBeNull()
   })
 
+  test('round-trips cachedConfig through write/read', () => {
+    const cachedConfig = {
+      bookmarks: {
+        enabled: true,
+        marker: '·',
+        thresholds: { minTokens: 6000, minToolCalls: 15, minSeconds: 120, agentBurstThreshold: 3, cooldownSeconds: 25 }
+      },
+      contextGuard: { enabled: true, contextWindowTokens: 200000, compactPercent: 0.76, denyPercent: 0.85, compactCooldownSeconds: 120, responseRatio: 0.25 },
+      sessionLocation: { enabled: false, verifyTab: false, terminals: { iterm2: { tabVerification: false }, terminal: { tabVerification: false } } }
+    }
+
+    const config: SessionConfig = {
+      sessionId: 'cache-test',
+      injectionMethod: 'tmux',
+      injectionTarget: '%1',
+      startedAt: Date.now(),
+      cachedConfig
+    }
+
+    writeSessionConfig('cache-test', config, stateDir)
+    const result = readSessionConfig('cache-test', stateDir)
+
+    expect(result).not.toBeNull()
+    const cached = result!.cachedConfig
+    expect(cached).toBeDefined()
+    expect(cached!.bookmarks.marker).toBe('·')
+    expect(cached!.contextGuard.compactPercent).toBe(0.76)
+    expect(cached!.contextGuard.denyPercent).toBe(0.85)
+    expect(cached!.sessionLocation.enabled).toBe(false)
+  })
+
+  test('readSessionConfig returns undefined cachedConfig when not set', () => {
+    const config: SessionConfig = {
+      sessionId: 'no-cache',
+      injectionMethod: 'disabled',
+      injectionTarget: '',
+      startedAt: Date.now()
+    }
+
+    writeSessionConfig('no-cache', config, stateDir)
+    const result = readSessionConfig('no-cache', stateDir)
+
+    expect(result).not.toBeNull()
+    expect(result!.cachedConfig).toBeUndefined()
+  })
+
   test('writeSessionConfig sanitises session IDs with special characters', () => {
     const config: SessionConfig = {
       sessionId: 'test/with:special chars',

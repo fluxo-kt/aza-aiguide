@@ -9,12 +9,14 @@ import {
   resolveTerminalProcessName,
   checkAccessibilityPermission,
   detectInjectionMethod,
+  detectSessionLocation,
+  verifyLocation,
   buildInjectionCommand,
   spawnDetached,
   requestBookmark,
   requestCompaction,
 } from '../src/lib/inject'
-import type { InjectionConfig } from '../src/lib/inject'
+import type { InjectionConfig, SessionLocation } from '../src/lib/inject'
 import { getLogPath } from '../src/lib/log'
 import type { TavConfig } from '../src/lib/config'
 
@@ -361,6 +363,115 @@ describe('inject utilities', () => {
 
       const logPath = getLogPath('test-session', tempDir)
       expect(existsSync(logPath)).toBe(false)
+    })
+  })
+
+  describe('detectSessionLocation', () => {
+    test('detects tmux pane from env', () => {
+      process.env.TMUX = '/tmp/tmux-1000/default,12345,0'
+      process.env.TMUX_PANE = '%3'
+      delete process.env.STY
+
+      const location = detectSessionLocation()
+      expect(location).not.toBeNull()
+      expect(location!.tmuxPane).toBe('%3')
+      expect(location!.detectedAt).toBeGreaterThan(0)
+    })
+
+    test('detects screen session from env', () => {
+      delete process.env.TMUX
+      delete process.env.TMUX_PANE
+      process.env.STY = '12345.pts-0.hostname'
+
+      const location = detectSessionLocation()
+      expect(location).not.toBeNull()
+      expect(location!.screenSession).toBe('12345.pts-0.hostname')
+    })
+
+    test('returns null when no location identifiers found', () => {
+      delete process.env.TMUX
+      delete process.env.TMUX_PANE
+      delete process.env.STY
+      delete process.env.TERM_PROGRAM
+
+      const location = detectSessionLocation()
+      // On darwin, might still detect terminal app; on other platforms, null
+      if (process.platform !== 'darwin') {
+        expect(location).toBeNull()
+      }
+    })
+
+    test('rejects invalid tmux pane IDs', () => {
+      process.env.TMUX = '/tmp/tmux-1000/default'
+      process.env.TMUX_PANE = 'invalid'
+      delete process.env.STY
+      delete process.env.TERM_PROGRAM
+
+      const location = detectSessionLocation()
+      // Invalid pane ID should not be stored
+      if (location) {
+        expect(location.tmuxPane).toBeUndefined()
+      }
+    })
+  })
+
+  describe('verifyLocation', () => {
+    const enabledConfig: TavConfig = {
+      bookmarks: {
+        enabled: true,
+        marker: '·',
+        thresholds: { minTokens: 6000, minToolCalls: 15, minSeconds: 120, agentBurstThreshold: 3, cooldownSeconds: 25 }
+      },
+      contextGuard: { enabled: true, contextWindowTokens: 200000, compactPercent: 0.76, denyPercent: 0.85, compactCooldownSeconds: 120, responseRatio: 0.25 },
+      sessionLocation: {
+        enabled: true,
+        verifyTab: false,
+        terminals: { iterm2: { tabVerification: false }, terminal: { tabVerification: false } }
+      }
+    }
+
+    const disabledConfig: TavConfig = {
+      ...enabledConfig,
+      sessionLocation: {
+        enabled: false,
+        verifyTab: false,
+        terminals: { iterm2: { tabVerification: false }, terminal: { tabVerification: false } }
+      }
+    }
+
+    test('returns true when feature disabled', () => {
+      const declared: SessionLocation = { tmuxPane: '%99', detectedAt: Date.now() }
+      // Even with mismatched location, disabled = always pass
+      expect(verifyLocation(declared, disabledConfig)).toBe(true)
+    })
+
+    test('returns true when no declared location (graceful degradation)', () => {
+      expect(verifyLocation(undefined, enabledConfig)).toBe(true)
+    })
+
+    test('returns true when tmux pane matches', () => {
+      process.env.TMUX = '/tmp/tmux-1000/default'
+      process.env.TMUX_PANE = '%3'
+
+      const declared: SessionLocation = { tmuxPane: '%3', detectedAt: Date.now() }
+      expect(verifyLocation(declared, enabledConfig)).toBe(true)
+    })
+
+    test('returns false when tmux pane mismatches', () => {
+      process.env.TMUX = '/tmp/tmux-1000/default'
+      process.env.TMUX_PANE = '%5'
+
+      const declared: SessionLocation = { tmuxPane: '%3', detectedAt: Date.now() }
+      expect(verifyLocation(declared, enabledConfig)).toBe(false)
+    })
+
+    test('returns false when screen session mismatches', () => {
+      delete process.env.TMUX
+      delete process.env.TMUX_PANE
+      process.env.STY = 'different-session'
+
+      const declared: SessionLocation = { screenSession: '12345.pts-0', detectedAt: Date.now() }
+      expect(verifyLocation(declared, enabledConfig)).toBe(false)
     })
   })
 

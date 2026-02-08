@@ -124,6 +124,51 @@ describe('readLastAssistantUsage', () => {
     expect(readLastAssistantUsage(path)).toBe(5000)
   })
 
+  test('returns most recent assistant entry by timestamp, not file order', () => {
+    const path = join(tempDir, 'out-of-order.jsonl')
+    // File order: entry with timestamp 2000 comes AFTER entry with timestamp 5000
+    // The fix ensures we return the one with highest timestamp (5000), not the last in file
+    const lines = [
+      JSON.stringify({ type: 'user', message: { content: 'hello' } }),
+      JSON.stringify({ type: 'assistant', timestamp: 5000, message: { usage: { input_tokens: 100, cache_creation_input_tokens: 0, cache_read_input_tokens: 49900 } } }),
+      JSON.stringify({ type: 'progress', status: 'running' }),
+      JSON.stringify({ type: 'assistant', timestamp: 2000, message: { usage: { input_tokens: 50, cache_creation_input_tokens: 0, cache_read_input_tokens: 950 } } }),
+    ]
+    writeFileSync(path, lines.join('\n') + '\n')
+
+    // Should return entry with timestamp 5000 (100 + 0 + 49900 = 50000), NOT timestamp 2000 (1000)
+    expect(readLastAssistantUsage(path)).toBe(50000)
+  })
+
+  test('returns most recent when cache segment creates stale high-token entry', () => {
+    const path = join(tempDir, 'cache-segment.jsonl')
+    // Simulates cache segment scenario: old entry has inflated tokens (183K),
+    // recent entry has low tokens (5K). Must return the recent one.
+    const lines = [
+      JSON.stringify({ type: 'user', message: { content: 'start' } }),
+      JSON.stringify({ type: 'assistant', timestamp: 1000, message: { usage: { input_tokens: 3000, cache_creation_input_tokens: 0, cache_read_input_tokens: 180000 } } }),
+      JSON.stringify({ type: 'user', message: { content: 'after compaction' } }),
+      JSON.stringify({ type: 'assistant', timestamp: 9000, message: { usage: { input_tokens: 1000, cache_creation_input_tokens: 500, cache_read_input_tokens: 3500 } } }),
+    ]
+    writeFileSync(path, lines.join('\n') + '\n')
+
+    // Should return 5000 (timestamp 9000), NOT 183000 (timestamp 1000)
+    expect(readLastAssistantUsage(path)).toBe(5000)
+  })
+
+  test('handles entries without timestamps (defaults to 0)', () => {
+    const path = join(tempDir, 'no-timestamp.jsonl')
+    const lines = [
+      JSON.stringify({ type: 'user', message: { content: 'test' } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, cache_creation_input_tokens: 0, cache_read_input_tokens: 900 } } }),
+      JSON.stringify({ type: 'assistant', timestamp: 5000, message: { usage: { input_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 1800 } } }),
+    ]
+    writeFileSync(path, lines.join('\n') + '\n')
+
+    // Entry with timestamp 5000 > default 0, so returns 2000
+    expect(readLastAssistantUsage(path)).toBe(2000)
+  })
+
   test('works with small chunkSize', () => {
     const path = join(tempDir, 'small-chunk.jsonl')
     const entry1 = JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, cache_creation_input_tokens: 0, cache_read_input_tokens: 900 } } })
