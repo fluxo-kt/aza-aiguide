@@ -4,23 +4,14 @@ import { readFileSync, writeFileSync, copyFileSync, readdirSync, statSync, exist
 import { join, basename } from 'path'
 import { homedir } from 'os'
 import { randomUUID } from 'crypto'
+// Re-export for backward compatibility (existing tests import from repair.ts)
+export { type JournalEntry, type ParsedLine, parseJSONL } from './lib/jsonl-types'
+
+// Local imports for use within this file
+import type { JournalEntry } from './lib/jsonl-types'
+import { parseJSONL } from './lib/jsonl-types'
 
 // --- Types ---
-
-export interface JournalEntry {
-  type: string
-  subtype?: string
-  uuid: string
-  parentUuid?: string
-  sessionId?: string
-  version?: string
-  cwd?: string
-  message?: { role: string; content: unknown }
-  timestamp?: string
-  isSidechain?: boolean
-  userType?: string
-  [key: string]: unknown
-}
 
 export interface SessionMetadata {
   sessionId: string
@@ -56,64 +47,55 @@ export const DEFAULT_REPAIR_OPTIONS: RepairOptions = {
  * Returns matching file paths sorted by modification time (newest first).
  */
 export function resolveSessionFiles(prefix: string): string[] {
-  const projectsDir = join(homedir(), '.claude', 'projects')
-
-  if (!existsSync(projectsDir)) {
-    return []
-  }
-
+  const claudeDir = join(homedir(), '.claude')
   const matches: Array<{ path: string; mtime: number }> = []
+  const seen = new Set<string>()
 
-  try {
-    const projectDirs = readdirSync(projectsDir)
-    for (const dir of projectDirs) {
-      const projectPath = join(projectsDir, dir)
-      try {
-        const stat = statSync(projectPath)
-        if (!stat.isDirectory()) continue
-
-        const files = readdirSync(projectPath)
-        for (const file of files) {
-          if (!file.endsWith('.jsonl')) continue
-          // Match by filename prefix (session UUID is the filename)
-          const sessionName = file.replace('.jsonl', '')
-          if (sessionName.startsWith(prefix)) {
-            const filePath = join(projectPath, file)
+  // Helper: add matching JSONL files from a flat directory
+  function scanFlat(dirPath: string): void {
+    if (!existsSync(dirPath)) return
+    try {
+      const files = readdirSync(dirPath)
+      for (const file of files) {
+        if (!file.endsWith('.jsonl')) continue
+        const sessionName = file.replace('.jsonl', '')
+        if (sessionName.startsWith(prefix) && !seen.has(sessionName)) {
+          const filePath = join(dirPath, file)
+          try {
             const fileStat = statSync(filePath)
             matches.push({ path: filePath, mtime: fileStat.mtimeMs })
-          }
+            seen.add(sessionName)
+          } catch { /* skip unreadable */ }
         }
-      } catch {
-        // Skip unreadable project dirs
       }
-    }
-  } catch {
-    // Projects dir unreadable
+    } catch { /* dir unreadable */ }
   }
+
+  // Search ~/.claude/projects/{hash}/ (nested — each hash dir contains JSONL files)
+  const projectsDir = join(claudeDir, 'projects')
+  if (existsSync(projectsDir)) {
+    try {
+      const projectDirs = readdirSync(projectsDir)
+      for (const dir of projectDirs) {
+        const projectPath = join(projectsDir, dir)
+        try {
+          const stat = statSync(projectPath)
+          if (!stat.isDirectory()) continue
+          scanFlat(projectPath)
+        } catch { /* skip unreadable */ }
+      }
+    } catch { /* projects dir unreadable */ }
+  }
+
+  // Search ~/.claude/transcripts/ (flat — JSONL files directly inside)
+  scanFlat(join(claudeDir, 'transcripts'))
 
   // Sort by mtime descending (newest first)
   matches.sort((a, b) => b.mtime - a.mtime)
   return matches.map(m => m.path)
 }
 
-// --- JSONL Parsing ---
-
-/**
- * Parses a JSONL file into an array of entries.
- * Invalid lines are preserved as raw strings for round-trip fidelity.
- */
-export function parseJSONL(content: string): Array<{ entry: JournalEntry | null; raw: string }> {
-  const lines = content.split('\n')
-  return lines
-    .filter(line => line.trim())
-    .map(raw => {
-      try {
-        return { entry: JSON.parse(raw) as JournalEntry, raw }
-      } catch {
-        return { entry: null, raw }
-      }
-    })
-}
+// --- Metadata Extraction ---
 
 /**
  * Extracts session metadata from the first user (human) entry.

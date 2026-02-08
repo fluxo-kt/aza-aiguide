@@ -1,5 +1,6 @@
 {
   "name": "tav",
-  "version": "0.2.0",
-  "description": "Conversation bookmarks for Claude Code — navigable anchor points in long sessions"
+  "version": "0.3.0",
+  "description": "Conversation bookmarks for Claude Code — navigable anchor points in long sessions",
+  "skills": "./skills/"
 }

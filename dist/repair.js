@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_REPAIR_OPTIONS = void 0;
+exports.DEFAULT_REPAIR_OPTIONS = exports.parseJSONL = void 0;
 exports.resolveSessionFiles = resolveSessionFiles;
-exports.parseJSONL = parseJSONL;
 exports.extractMetadata = extractMetadata;
 exports.findBreakPoints = findBreakPoints;
 exports.findLastCompactBoundary = findLastCompactBoundary;
@@ -17,6 +16,10 @@ const fs_1 = require("fs");
 const path_1 = require("path");
 const os_1 = require("os");
 const crypto_1 = require("crypto");
+// Re-export for backward compatibility (existing tests import from repair.ts)
+var jsonl_types_1 = require("./lib/jsonl-types");
+Object.defineProperty(exports, "parseJSONL", { enumerable: true, get: function () { return jsonl_types_1.parseJSONL; } });
+const jsonl_types_2 = require("./lib/jsonl-types");
 exports.DEFAULT_REPAIR_OPTIONS = {
     interval: 5,
     dryRun: false,
@@ -29,62 +32,57 @@ exports.DEFAULT_REPAIR_OPTIONS = {
  * Returns matching file paths sorted by modification time (newest first).
  */
 function resolveSessionFiles(prefix) {
-    const projectsDir = (0, path_1.join)((0, os_1.homedir)(), '.claude', 'projects');
-    if (!(0, fs_1.existsSync)(projectsDir)) {
-        return [];
-    }
+    const claudeDir = (0, path_1.join)((0, os_1.homedir)(), '.claude');
     const matches = [];
-    try {
-        const projectDirs = (0, fs_1.readdirSync)(projectsDir);
-        for (const dir of projectDirs) {
-            const projectPath = (0, path_1.join)(projectsDir, dir);
-            try {
-                const stat = (0, fs_1.statSync)(projectPath);
-                if (!stat.isDirectory())
+    const seen = new Set();
+    // Helper: add matching JSONL files from a flat directory
+    function scanFlat(dirPath) {
+        if (!(0, fs_1.existsSync)(dirPath))
+            return;
+        try {
+            const files = (0, fs_1.readdirSync)(dirPath);
+            for (const file of files) {
+                if (!file.endsWith('.jsonl'))
                     continue;
-                const files = (0, fs_1.readdirSync)(projectPath);
-                for (const file of files) {
-                    if (!file.endsWith('.jsonl'))
-                        continue;
-                    // Match by filename prefix (session UUID is the filename)
-                    const sessionName = file.replace('.jsonl', '');
-                    if (sessionName.startsWith(prefix)) {
-                        const filePath = (0, path_1.join)(projectPath, file);
+                const sessionName = file.replace('.jsonl', '');
+                if (sessionName.startsWith(prefix) && !seen.has(sessionName)) {
+                    const filePath = (0, path_1.join)(dirPath, file);
+                    try {
                         const fileStat = (0, fs_1.statSync)(filePath);
                         matches.push({ path: filePath, mtime: fileStat.mtimeMs });
+                        seen.add(sessionName);
                     }
+                    catch { /* skip unreadable */ }
                 }
             }
-            catch {
-                // Skip unreadable project dirs
+        }
+        catch { /* dir unreadable */ }
+    }
+    // Search ~/.claude/projects/{hash}/ (nested — each hash dir contains JSONL files)
+    const projectsDir = (0, path_1.join)(claudeDir, 'projects');
+    if ((0, fs_1.existsSync)(projectsDir)) {
+        try {
+            const projectDirs = (0, fs_1.readdirSync)(projectsDir);
+            for (const dir of projectDirs) {
+                const projectPath = (0, path_1.join)(projectsDir, dir);
+                try {
+                    const stat = (0, fs_1.statSync)(projectPath);
+                    if (!stat.isDirectory())
+                        continue;
+                    scanFlat(projectPath);
+                }
+                catch { /* skip unreadable */ }
             }
         }
+        catch { /* projects dir unreadable */ }
     }
-    catch {
-        // Projects dir unreadable
-    }
+    // Search ~/.claude/transcripts/ (flat — JSONL files directly inside)
+    scanFlat((0, path_1.join)(claudeDir, 'transcripts'));
     // Sort by mtime descending (newest first)
     matches.sort((a, b) => b.mtime - a.mtime);
     return matches.map(m => m.path);
 }
-// --- JSONL Parsing ---
-/**
- * Parses a JSONL file into an array of entries.
- * Invalid lines are preserved as raw strings for round-trip fidelity.
- */
-function parseJSONL(content) {
-    const lines = content.split('\n');
-    return lines
-        .filter(line => line.trim())
-        .map(raw => {
-        try {
-            return { entry: JSON.parse(raw), raw };
-        }
-        catch {
-            return { entry: null, raw };
-        }
-    });
-}
+// --- Metadata Extraction ---
 /**
  * Extracts session metadata from the first user (human) entry.
  */
@@ -301,7 +299,7 @@ function repair(filePath, options = exports.DEFAULT_REPAIR_OPTIONS) {
         return result;
     }
     // Parse JSONL
-    const entries = parseJSONL(content);
+    const entries = (0, jsonl_types_2.parseJSONL)(content);
     if (entries.length === 0) {
         result.errors.push('File is empty');
         return result;
