@@ -1,19 +1,11 @@
 #!/usr/bin/env node
 import { loadConfig } from './lib/config'
-import { appendEvent, parseLog, sanitizeSessionId, meetsAnyThreshold } from './lib/log'
+import { appendEvent, parseLog } from './lib/log'
 import { buildInjectionCommand, spawnDetached, requestCompaction } from './lib/inject'
 import type { InjectionMethod, InjectionConfig } from './lib/inject'
-import { readFileSync, existsSync } from 'fs'
-import { join } from 'path'
-import { homedir } from 'os'
 import { readStdin } from './lib/stdin'
-
-interface SessionConfig {
-  sessionId: string
-  injectionMethod: string
-  injectionTarget: string
-  startedAt: number
-}
+import { readSessionConfig } from './lib/session'
+import { shouldInjectBookmark } from './lib/evaluate'
 
 interface HookEvent {
   hook_event_name?: string
@@ -27,23 +19,6 @@ interface HookEvent {
   toolOutput?: string
   output?: string
   [key: string]: unknown
-}
-
-function getSessionConfig(sessionId: string, stateDir?: string): SessionConfig | null {
-  const dir = stateDir || join(homedir(), '.claude', 'tav', 'state')
-  const sanitized = sanitizeSessionId(sessionId)
-  const path = join(dir, `${sanitized}.json`)
-
-  if (!existsSync(path)) {
-    return null
-  }
-
-  try {
-    const content = readFileSync(path, 'utf-8')
-    return JSON.parse(content) as SessionConfig
-  } catch {
-    return null
-  }
 }
 
 /**
@@ -79,7 +54,7 @@ export function handleSubagentStop(sessionId: string, data: Record<string, unkno
       const compactCooldownMs = cg.compactCooldownSeconds * 1000
       const timeSinceCompaction = Date.now() - metrics.lastCompactionAt
       if (timeSinceCompaction >= compactCooldownMs) {
-        const sessionConfig = getSessionConfig(sessionId, sessionStateDir)
+        const sessionConfig = readSessionConfig(sessionId, sessionStateDir)
         if (sessionConfig && sessionConfig.injectionMethod !== 'disabled') {
           const injection: InjectionConfig = {
             method: sessionConfig.injectionMethod as InjectionMethod,
@@ -91,39 +66,15 @@ export function handleSubagentStop(sessionId: string, data: Record<string, unkno
     }
   }
 
-  // Guard: bookmarks disabled globally (mirrors evaluateBookmark Guard 1)
-  if (!config.bookmarks.enabled) {
-    return false
-  }
+  // Read session config for injection details
+  const sessionConfig = readSessionConfig(sessionId, sessionStateDir)
+  const injectionMethod = sessionConfig?.injectionMethod ?? 'disabled'
 
-  const thresholds = config.bookmarks.thresholds
+  // Unified evaluation — same guard ordering as Stop hook
+  const evaluation = shouldInjectBookmark({ config, metrics, injectionMethod })
 
-  // Evaluate ALL thresholds — SubagentStop may be the only hook that fires
-  // during long continuous turns where the Stop hook rarely triggers.
-  const { met } = meetsAnyThreshold(metrics, thresholds)
-
-  if (met) {
-    const cooldownMs = thresholds.cooldownSeconds * 1000
-    const timeSinceLastAction = Date.now() - Math.max(metrics.lastInjectionAt, metrics.lastBookmarkAt)
-
-    if (timeSinceLastAction < cooldownMs) {
-      return false
-    }
-
-    if (metrics.lastLineIsBookmark) {
-      return false
-    }
-
-    const sessionConfig = getSessionConfig(sessionId, sessionStateDir)
-    if (!sessionConfig) {
-      return false
-    }
-
-    const { injectionMethod, injectionTarget } = sessionConfig
-
-    if (injectionMethod === 'disabled') {
-      return false
-    }
+  if (evaluation.shouldInject) {
+    const injectionTarget = sessionConfig?.injectionTarget ?? ''
 
     appendEvent(sessionId, `I ${Date.now()}`, logDir)
 

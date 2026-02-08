@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 import { loadConfig } from './lib/config'
 import type { TavConfig } from './lib/config'
-import { parseLog, appendEvent, sanitizeSessionId, meetsAnyThreshold } from './lib/log'
+import { parseLog, appendEvent } from './lib/log'
 import type { LogMetrics } from './lib/log'
 import { buildInjectionCommand, spawnDetached, requestCompaction } from './lib/inject'
 import type { InjectionMethod, InjectionConfig } from './lib/inject'
 import { isContextLimitStop, isUserAbort } from './lib/guards'
 import { readStdin } from './lib/stdin'
-import { readFileSync } from 'fs'
-import { join } from 'path'
-import { homedir } from 'os'
+import { readSessionConfig } from './lib/session'
+import { shouldInjectBookmark } from './lib/evaluate'
 
 /**
  * Evaluates whether to inject a bookmark after Claude's turn ends.
+ * Stop-specific guards (contextLimitStop, userAbort) are checked here;
+ * common guards are delegated to shouldInjectBookmark.
  */
 export function evaluateBookmark(
   data: Record<string, unknown>,
@@ -20,41 +21,18 @@ export function evaluateBookmark(
   metrics: LogMetrics,
   injectionMethod: InjectionMethod
 ): { shouldInject: boolean; reason: string } {
-  // Guard 1: Bookmarks disabled globally
-  if (!config.bookmarks.enabled) {
-    return { shouldInject: false, reason: 'bookmarks disabled in config' }
-  }
-
-  // Guard 2: Injection disabled for this session
-  if (injectionMethod === 'disabled') {
-    return { shouldInject: false, reason: 'injection method is disabled' }
-  }
-
-  // Guard 3: Context limit stop (let compaction happen)
+  // Stop-specific guard: context limit stop (let compaction happen)
   if (isContextLimitStop(data)) {
     return { shouldInject: false, reason: 'context limit stop detected' }
   }
 
-  // Guard 4: User abort
+  // Stop-specific guard: user abort
   if (isUserAbort(data)) {
     return { shouldInject: false, reason: 'user abort detected' }
   }
 
-  // Guard 5: Last line is already a bookmark
-  if (metrics.lastLineIsBookmark) {
-    return { shouldInject: false, reason: 'last line is already a bookmark' }
-  }
-
-  // Guard 6: Cooldown check
-  const lastActivityAt = Math.max(metrics.lastInjectionAt, metrics.lastBookmarkAt)
-  const cooldownMs = config.bookmarks.thresholds.cooldownSeconds * 1000
-  if (Date.now() - lastActivityAt < cooldownMs) {
-    return { shouldInject: false, reason: 'within cooldown period' }
-  }
-
-  // Threshold evaluation (ANY threshold met triggers bookmark)
-  const { met, reason } = meetsAnyThreshold(metrics, config.bookmarks.thresholds)
-  return { shouldInject: met, reason }
+  // Common evaluation (enabled, disabled, lastLineIsBookmark, cooldown, thresholds)
+  return shouldInjectBookmark({ config, metrics, injectionMethod })
 }
 
 /**
@@ -74,23 +52,16 @@ async function main(): Promise<void> {
       return
     }
 
-    // Read session config
-    const sanitized = sanitizeSessionId(sessionId)
-    const sessionConfigPath = join(homedir(), '.claude', 'tav', 'state', `${sanitized}.json`)
+    // Read session config via shared module
+    const sessionConfig = readSessionConfig(sessionId)
 
-    let injectionMethod: InjectionMethod = 'disabled'
-    let injectionTarget = ''
-
-    try {
-      const sessionConfigRaw = readFileSync(sessionConfigPath, 'utf8')
-      const sessionConfig = JSON.parse(sessionConfigRaw)
-      injectionMethod = sessionConfig.injectionMethod || 'disabled'
-      injectionTarget = sessionConfig.injectionTarget || ''
-    } catch {
-      // Session config missing or unreadable
+    if (!sessionConfig) {
       console.log(JSON.stringify({ continue: true }))
       return
     }
+
+    const injectionMethod = (sessionConfig.injectionMethod || 'disabled') as InjectionMethod
+    const injectionTarget = sessionConfig.injectionTarget || ''
 
     // Parse log metrics
     const metrics = parseLog(sessionId)

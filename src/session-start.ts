@@ -1,27 +1,19 @@
 #!/usr/bin/env node
 
 import { writeFileSync } from 'fs'
-import { join } from 'path'
-import { homedir } from 'os'
 import { loadConfig } from './lib/config'
 import type { TavConfig } from './lib/config'
-import { ensureStateDir, getLogPath, cleanOldSessions, sanitizeSessionId } from './lib/log'
+import { ensureStateDir, getLogPath, cleanOldSessions } from './lib/log'
 import { detectInjectionMethod, checkAccessibilityPermission } from './lib/inject'
 import type { InjectionConfig } from './lib/inject'
 import { readStdin } from './lib/stdin'
+import { writeSessionConfig } from './lib/session'
+import type { SessionConfig } from './lib/session'
 
 interface StdinData {
   session_id?: string
   sessionId?: string
   cwd?: string
-}
-
-interface SessionConfig {
-  sessionId: string
-  injectionMethod: string
-  injectionTarget: string
-  startedAt: number
-  disabledReason?: string
 }
 
 async function main(): Promise<void> {
@@ -68,10 +60,7 @@ async function main(): Promise<void> {
     // Ensure state directory exists
     ensureStateDir()
 
-    // Sanitize session ID for filesystem
-    const sanitizedId = sanitizeSessionId(sessionId)
-
-    // Write session config
+    // Write session config via shared module
     const sessionConfig: SessionConfig = {
       sessionId,
       injectionMethod: injection.method,
@@ -80,8 +69,7 @@ async function main(): Promise<void> {
       ...(disabledReason ? { disabledReason } : {})
     }
 
-    const sessionConfigPath = join(homedir(), '.claude', 'tav', 'state', `${sanitizedId}.json`)
-    writeFileSync(sessionConfigPath, JSON.stringify(sessionConfig, null, 2), 'utf-8')
+    writeSessionConfig(sessionId, sessionConfig)
 
     // Create empty activity log (exclusive create — if a concurrent hook
     // already created it via appendEvent, don't truncate their data)
