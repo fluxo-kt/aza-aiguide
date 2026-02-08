@@ -70,10 +70,10 @@ function deepMerge<T>(target: T, source: Partial<T>): T {
  * objects etc. that Number() would silently coerce to 0.
  */
 function validNumber(value: unknown, fallback: number): number {
-  if (typeof value === 'number') return isNaN(value) || value < 0 ? fallback : value
+  if (typeof value === 'number') return !Number.isFinite(value) || value < 0 ? fallback : value
   if (typeof value === 'string') {
     const n = Number(value)
-    return isNaN(n) || n < 0 ? fallback : n
+    return !Number.isFinite(n) || n < 0 ? fallback : n
   }
   return fallback
 }

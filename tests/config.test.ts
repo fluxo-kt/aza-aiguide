@@ -109,6 +109,18 @@ describe('config loader', () => {
     expect(config.bookmarks.thresholds.cooldownSeconds).toBe(DEFAULT_CONFIG.bookmarks.thresholds.cooldownSeconds)
   })
 
+  test('loadConfig rejects string "Infinity" threshold values', () => {
+    // JSON has no infinity literal, so the realistic attack vector is string values
+    // that Number() would coerce: Number("Infinity") === Infinity
+    writeFileSync(configPath, JSON.stringify({
+      bookmarks: { thresholds: { minTokens: 'Infinity', cooldownSeconds: '-Infinity' } }
+    }), 'utf-8')
+    const config = loadConfig(configPath)
+
+    expect(config.bookmarks.thresholds.minTokens).toBe(DEFAULT_CONFIG.bookmarks.thresholds.minTokens)
+    expect(config.bookmarks.thresholds.cooldownSeconds).toBe(DEFAULT_CONFIG.bookmarks.thresholds.cooldownSeconds)
+  })
+
   test('loadConfig validates enabled as boolean', () => {
     writeFileSync(configPath, JSON.stringify({
       bookmarks: { enabled: 'yes' }

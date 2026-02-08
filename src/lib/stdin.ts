@@ -6,18 +6,32 @@
 export function readStdin(timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
+
+    const cleanup = () => {
+      process.stdin.removeListener('data', onData)
+      process.stdin.removeListener('end', onEnd)
+      process.stdin.removeListener('error', onError)
+    }
+
     const timer = setTimeout(() => {
+      cleanup()
       reject(new Error(`stdin read timeout after ${timeoutMs}ms`))
     }, timeoutMs)
 
-    process.stdin.on('data', (chunk) => chunks.push(chunk))
-    process.stdin.on('end', () => {
+    const onData = (chunk: Buffer) => { chunks.push(chunk) }
+    const onEnd = () => {
       clearTimeout(timer)
+      cleanup()
       resolve(Buffer.concat(chunks).toString('utf8'))
-    })
-    process.stdin.on('error', (err) => {
+    }
+    const onError = (err: Error) => {
       clearTimeout(timer)
+      cleanup()
       reject(err)
-    })
+    }
+
+    process.stdin.on('data', onData)
+    process.stdin.on('end', onEnd)
+    process.stdin.on('error', onError)
   })
 }

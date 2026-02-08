@@ -110,17 +110,27 @@ describe('log', () => {
     expect(metrics.estimatedTokens).toBe(350)  // (400 + 800 + 200) / 4
   })
 
-  test('parseLog calculates elapsedSeconds from first activity to now', () => {
+  test('parseLog calculates elapsedSeconds as activity span (not wall-clock)', () => {
     const sessionId = 'elapsed-test'
-    const fiveSecondsAgo = Date.now() - 5000
+    const baseTime = 1000000
 
-    appendEvent(sessionId, `T ${fiveSecondsAgo} 100`, testDir)
-    appendEvent(sessionId, `A ${Date.now()} 200`, testDir)
+    appendEvent(sessionId, `T ${baseTime} 100`, testDir)
+    appendEvent(sessionId, `A ${baseTime + 5000} 200`, testDir)
 
     const metrics = parseLog(sessionId, testDir)
-    // elapsedSeconds = now - firstTimestamp (per plan spec)
-    expect(metrics.elapsedSeconds).toBeGreaterThanOrEqual(4)
-    expect(metrics.elapsedSeconds).toBeLessThanOrEqual(7)
+    // elapsedSeconds = lastTimestamp - firstTimestamp (activity span)
+    // Not Date.now() - firstTimestamp (wall-clock) — avoids false triggers after idle
+    expect(metrics.elapsedSeconds).toBe(5)
+  })
+
+  test('parseLog elapsedSeconds is zero with single event (no span)', () => {
+    const sessionId = 'single-event-test'
+
+    appendEvent(sessionId, `T ${Date.now()} 100`, testDir)
+
+    const metrics = parseLog(sessionId, testDir)
+    // Single event has no span — first === last
+    expect(metrics.elapsedSeconds).toBe(0)
   })
 
   test('parseLog tracks lastInjectionAt and lastBookmarkAt', () => {

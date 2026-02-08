@@ -88,11 +88,12 @@ async function main(): Promise<void> {
     const logPath = getLogPath(sessionId)
     try { writeFileSync(logPath, '', { flag: 'wx' }) } catch { /* already exists */ }
 
-    // Clean old sessions (7 days)
-    cleanOldSessions(7)
-
-    // Output success
+    // Output success BEFORE cleanup — cleanup can be slow with many files
+    // and must not block the {continue:true} output within the hook timeout
     console.log(JSON.stringify({ continue: true }))
+
+    // Clean old sessions (7 days) — best-effort, after output
+    cleanOldSessions(7)
   } catch (error) {
     // Never block session start
     console.error('SessionStart error:', error instanceof Error ? error.message : String(error))
