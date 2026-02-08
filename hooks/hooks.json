@@ -12,6 +12,18 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '\"${BUN:-bun}\" run \"${CLAUDE_PLUGIN_ROOT}/src/context-guard.ts\" 2>/dev/null || node \"${CLAUDE_PLUGIN_ROOT}/dist/context-guard.js\"'",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "*",
