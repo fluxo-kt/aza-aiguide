@@ -29,7 +29,7 @@ Repair a dead session by inserting synthetic rewind points.
 bun run src/repair.ts <prefix>
 ```
 
-Add `--dry-run` to preview without modifying. Add `--interval N` to set break interval (default: 5).
+Add `--dry-run` to preview without modifying. Add `--interval N` to set break interval (default: 1).
 
 ### `/tav status`
 

@@ -22,7 +22,7 @@ export interface SessionMetadata {
 }
 
 export interface RepairOptions {
-  interval: number    // Insert every N assistant entries (default: 5)
+  interval: number    // Insert every N assistant entries (default: 1)
   dryRun: boolean     // Preview only
   verify: boolean     // Validate after repair
   marker: string      // Bookmark marker (default: ·)
@@ -36,7 +36,7 @@ export interface RepairResult {
 }
 
 export const DEFAULT_REPAIR_OPTIONS: RepairOptions = {
-  interval: 5,
+  interval: 1,
   dryRun: false,
   verify: true,
   marker: '\u00B7'
@@ -737,7 +737,7 @@ Usage:
 
 Options:
   --dry-run        Preview changes without modifying
-  --interval N     Insert every N assistant entries (default: 5)
+  --interval N     Insert every N assistant entries (default: 1)
   --verify         Validate chain integrity after repair (default: on)
   --no-verify      Skip validation
   --marker CHAR    Bookmark marker (default: ·)
@@ -787,7 +787,7 @@ async function main(): Promise<void> {
         options.dryRun = true
         break
       case '--interval':
-        options.interval = parseInt(args[++i], 10) || 5
+        options.interval = parseInt(args[++i], 10) || 1
         break
       case '--verify':
         options.verify = true

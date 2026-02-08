@@ -24,7 +24,7 @@ var jsonl_types_1 = require("./lib/jsonl-types");
 Object.defineProperty(exports, "parseJSONL", { enumerable: true, get: function () { return jsonl_types_1.parseJSONL; } });
 const jsonl_types_2 = require("./lib/jsonl-types");
 exports.DEFAULT_REPAIR_OPTIONS = {
-    interval: 5,
+    interval: 1,
     dryRun: false,
     verify: true,
     marker: '\u00B7'
@@ -617,7 +617,7 @@ Usage:
 
 Options:
   --dry-run        Preview changes without modifying
-  --interval N     Insert every N assistant entries (default: 5)
+  --interval N     Insert every N assistant entries (default: 1)
   --verify         Validate chain integrity after repair (default: on)
   --no-verify      Skip validation
   --marker CHAR    Bookmark marker (default: ·)
@@ -660,7 +660,7 @@ async function main() {
                 options.dryRun = true;
                 break;
             case '--interval':
-                options.interval = parseInt(args[++i], 10) || 5;
+                options.interval = parseInt(args[++i], 10) || 1;
                 break;
             case '--verify':
                 options.verify = true;
