@@ -1,18 +1,22 @@
 # tav — Conversation Bookmark Plugin for Claude Code
 
-Auto-injects minimal bookmark messages (`·`) into long Claude Code sessions via terminal input injection (tmux/screen/osascript), creating navigable rewind points. Dual-hook pipeline: activity hooks count work, Stop/SubagentStop hooks evaluate adaptive thresholds and spawn detached background processes that type `·` into the terminal after 1.5s delay. A UserPromptSubmit hook intercepts the synthetic message and tells Claude to ignore it via `additionalContext`.
+Defence-in-depth context protection for Claude Code sessions. Five layers prevent context death during parallel agent execution: proactive `/compact` injection, PreToolUse agent throttling, PreCompact state preservation, bookmark rewind point injection, and offline JSONL session repair. Terminal input injection via tmux/screen/osascript creates navigable rewind points (`·`). A UserPromptSubmit hook intercepts the synthetic message and tells Claude to ignore it via `additionalContext`.
 
 ## Architecture
 
-**Hook pipeline** (4 scripts, 5 hook events):
+**Hook pipeline** (6 scripts, 8 hook events):
 
 | Hook Event | Script | Timeout | readStdin | Purpose |
 |------------|--------|---------|-----------|---------|
 | SessionStart | session-start.ts | 5s | 3000ms | Detect injection method (tmux/screen/osascript), write session config |
+| PreToolUse | context-guard.ts | 3s | 2500ms | Deny `Task` tool calls when context pressure exceeds `denyThreshold` |
 | PostToolUse | bookmark-activity.ts | 3s | 2500ms | Append `T` line to activity log |
-| SubagentStop | bookmark-activity.ts | 5s | 2500ms | Append `A` line + evaluate ALL thresholds (burst protection) |
-| Stop | bookmark-stop.ts | 5s | 4000ms | Parse log, evaluate thresholds, spawn injection |
+| SubagentStop | bookmark-activity.ts | 5s | 2500ms | Append `A` line + evaluate ALL thresholds + compaction check |
+| PreCompact | bookmark-precompact.ts | 3s | 2500ms | Reset activity window (`B` marker), inject `additionalContext` summary |
+| Stop | bookmark-stop.ts | 5s | 4000ms | Parse log, evaluate thresholds, spawn injection + compaction check |
 | UserPromptSubmit | bookmark-submit.ts | 3s | 2500ms | Intercept `·`, return `additionalContext` telling Claude to ignore it |
+
+**Standalone CLI**: `src/repair.ts` — offline JSONL surgery for dead sessions (inserts synthetic rewind points).
 
 **CRITICAL: readStdin timeout MUST be < hook timeout** with >= 500ms margin. If readStdin exceeds hook timeout, process is killed silently — no error handling, no `{"continue":true}` output.
 
@@ -25,9 +29,10 @@ T 1707321600000 1234     # Tool call: timestamp, response char count
 A 1707321601000 5678     # Agent return: timestamp, output char count
 I 1707321603000          # Injection spawned (pre-spawn marker)
 B 1707321605000          # Bookmark confirmed
+C 1707321610000          # Compaction injected (/compact sent to terminal)
 ```
 
-All metrics derived fresh from log on each evaluation — counters never accumulate drift. Lines after last `B` = current window. `meetsAnyThreshold()` in `lib/log.ts` is the **single source of truth** for threshold evaluation — used by both Stop and SubagentStop.
+Two metric scopes: **windowed** (T/A lines after last `B` = current window, used for bookmark thresholds) and **cumulative** (all T/A chars across entire log, used for context guard). `meetsAnyThreshold()` in `lib/log.ts` is the **single source of truth** for threshold evaluation. `shouldInjectBookmark()` in `lib/evaluate.ts` is the **single source of truth** for guard ordering — used by both Stop and SubagentStop.
 
 ## Three-Layer Feedback Loop Prevention
 
@@ -50,7 +55,7 @@ These three barriers make infinite loops **structurally impossible**.
 
 ```bash
 bun install              # dev deps only (typescript, @types/node, bun-types)
-bun test                 # 149 tests across 8 files
+bun test                 # 227 tests across 13 files
 bun run build            # tsc -p tsconfig.build.json → dist/
 bunx tsc --noEmit        # typecheck (includes tests)
 ```
@@ -65,16 +70,37 @@ bunx tsc --noEmit        # typecheck (includes tests)
 |------|------|
 | `src/lib/log.ts` | Activity log: append, parse, derive metrics, `meetsAnyThreshold()` |
 | `src/lib/config.ts` | Config loader with deep merge + type validation (`validNumber()`, `validateConfig()`) |
-| `src/lib/inject.ts` | Injection method detection, shell command building, `spawnDetached()` |
+| `src/lib/inject.ts` | Injection: detection, command building, `requestBookmark()`, `requestCompaction()` |
+| `src/lib/evaluate.ts` | `shouldInjectBookmark()` — unified guard ordering for Stop + SubagentStop |
+| `src/lib/session.ts` | `SessionConfig` type, `readSessionConfig()`, `writeSessionConfig()` |
 | `src/lib/guards.ts` | Stop guards: `isContextLimitStop()`, `isUserAbort()` — pure functions |
 | `src/lib/stdin.ts` | Shared `readStdin(timeoutMs)` — single implementation for all hooks |
-| `hooks/hooks.json` | 5 hook events → 4 scripts. Runner: bun first, node dist/ fallback |
+| `src/context-guard.ts` | PreToolUse hook: denies `Task` calls when context pressure exceeds threshold |
+| `src/bookmark-precompact.ts` | PreCompact hook: resets activity window, injects summary into compaction |
+| `src/repair.ts` | Standalone CLI: JSONL surgery to insert rewind points in dead sessions |
+| `hooks/hooks.json` | 8 hook events → 6 scripts. Runner: bun first, node dist/ fallback |
 
 ## Configuration
 
-`~/.claude/tav/config.json` — partial configs deep-merged with defaults. All threshold values validated via `validNumber()` (rejects null/arrays/objects that `Number()` would silently coerce to 0).
+`~/.claude/tav/config.json` — partial configs deep-merged with defaults. All threshold values validated via `validNumber()` (rejects `Infinity`, null, arrays, objects that `Number()` would silently coerce to 0).
 
-Defaults: `minTokens:6000`, `minToolCalls:15`, `minSeconds:120`, `agentBurstThreshold:3`, `cooldownSeconds:25`. ANY threshold met triggers bookmark.
+**Bookmark thresholds**: `minTokens:6000`, `minToolCalls:15`, `minSeconds:120`, `agentBurstThreshold:3`, `cooldownSeconds:25`. ANY threshold met triggers bookmark.
+
+**Context guard** (defence-in-depth):
+```json
+{
+  "contextGuard": {
+    "enabled": true,
+    "compactThreshold": 30000,
+    "compactCooldownSeconds": 120,
+    "denyThreshold": 45000
+  }
+}
+```
+- `compactThreshold`: cumulative estimated tokens before injecting `/compact` (~60% capacity)
+- `denyThreshold`: cumulative tokens before denying new `Task` tool calls (~90% capacity)
+- Compaction injects `/compact` as real user input via terminal — the only external mechanism that triggers compaction
+- Agent throttling returns `permissionDecision: "deny"` on `PreToolUse` for `Task` calls
 
 ## Injection Fallback Chain
 
@@ -118,9 +144,28 @@ All tests use `bun:test`. Each test file creates a temp dir (`os.tmpdir()`), pas
 
 Key test patterns:
 - **Config tests**: write temp config files with various invalid/partial data, verify `loadConfig()` returns validated defaults
-- **Log tests**: append events to temp dir, verify `parseLog()` returns correct metrics
+- **Log tests**: append events to temp dir, verify `parseLog()` returns correct metrics (windowed + cumulative)
 - **Inject tests**: mock `process.env` for method detection, verify command strings are properly sanitised
-- **Hook tests**: call exported functions directly (`evaluateBookmark`, `handleSubagentStop`, `processBookmark`) — no subprocess spawning in tests
+- **Hook tests**: call exported functions directly (`evaluateBookmark`, `handleSubagentStop`, `processBookmark`, `evaluateContextPressure`, `processPreCompact`) — no subprocess spawning in tests
+- **Evaluate tests**: verify unified guard ordering in `shouldInjectBookmark()` — covers all guard paths
+- **Session tests**: round-trip `writeSessionConfig`/`readSessionConfig` with edge cases (corrupted JSON, special chars)
+- **Repair tests**: end-to-end JSONL surgery with chain validation, break point detection, dry-run, compact boundary handling
+
+## Session Repair Tool
+
+Standalone CLI for offline JSONL surgery on dead sessions. Run from a separate terminal (the dead session cannot repair itself).
+
+```bash
+bun run src/repair.ts <session-id-prefix>        # Repair by prefix
+bun run src/repair.ts <path/to/session.jsonl>    # Repair by path
+bun run src/repair.ts list                        # List sessions
+bun run src/repair.ts <prefix> --dry-run          # Preview only
+bun run src/repair.ts <prefix> --interval 3       # Break every 3 assistant entries
+```
+
+Creates `.tav-backup` before modifying. Inserts synthetic user messages (`·`) at break points (every N assistant entries, turn boundaries, time gaps). Repairs UUID chain. Validates integrity.
+
+**WARNING**: CC loading repaired JSONL as rewind points is UNVERIFIED. Always test on a non-critical session first.
 
 ## Multi-Session Safety
 
