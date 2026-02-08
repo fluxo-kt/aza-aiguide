@@ -5,11 +5,13 @@ exports.sanitizeForShell = sanitizeForShell;
 exports.sanitizeForAppleScript = sanitizeForAppleScript;
 exports.resolveTerminalProcessName = resolveTerminalProcessName;
 exports.checkAccessibilityPermission = checkAccessibilityPermission;
+exports.detectSessionLocation = detectSessionLocation;
 exports.detectInjectionMethod = detectInjectionMethod;
 exports.buildInjectionCommand = buildInjectionCommand;
 exports.spawnDetached = spawnDetached;
 exports.requestBookmark = requestBookmark;
 exports.requestCompaction = requestCompaction;
+exports.verifyLocation = verifyLocation;
 const child_process_1 = require("child_process");
 const log_1 = require("./log");
 /**
@@ -69,6 +71,38 @@ function checkAccessibilityPermission() {
     catch {
         return false;
     }
+}
+/**
+ * Detects the current terminal location for session safety verification.
+ * Gathers all available location identifiers from the environment.
+ * Returns null if detection fails or no location info available.
+ */
+function detectSessionLocation() {
+    const location = {
+        detectedAt: Date.now(),
+    };
+    // tmux pane ID
+    const tmuxPane = process.env.TMUX_PANE;
+    if (tmuxPane && isValidPaneId(tmuxPane)) {
+        location.tmuxPane = tmuxPane;
+    }
+    // GNU Screen session
+    const screenSession = process.env.STY;
+    if (screenSession) {
+        location.screenSession = screenSession;
+    }
+    // macOS terminal app
+    if (process.platform === 'darwin') {
+        const terminalProcess = resolveTerminalProcessName();
+        if (terminalProcess) {
+            location.terminalApp = terminalProcess;
+        }
+    }
+    // Return null if no location identifiers found
+    if (!location.tmuxPane && !location.screenSession && !location.terminalApp) {
+        return null;
+    }
+    return location;
 }
 /**
  * Detects the available injection method based on environment variables and platform.
@@ -184,5 +218,35 @@ function requestCompaction(sessionId, injection, stateDir) {
         return false;
     (0, log_1.appendEvent)(sessionId, `C ${Date.now()}`, stateDir);
     spawnDetached(command);
+    return true;
+}
+/**
+ * Verifies that current terminal location matches the declared session location.
+ * Returns true if verification passes or is disabled (proceed with injection).
+ * Returns false if location mismatch detected (skip injection).
+ *
+ * Graceful degradation: if detection fails or feature is disabled, returns true.
+ */
+function verifyLocation(declaredLocation, config) {
+    // Feature disabled: skip verification
+    if (!config.sessionLocation.enabled)
+        return true;
+    // No declared location: graceful degradation
+    if (!declaredLocation)
+        return true;
+    // Detect current location
+    const current = detectSessionLocation();
+    if (!current)
+        return true; // detection failed: graceful degradation
+    // Compare each field that exists in declared location
+    if (declaredLocation.tmuxPane && current.tmuxPane !== declaredLocation.tmuxPane)
+        return false;
+    if (declaredLocation.screenSession && current.screenSession !== declaredLocation.screenSession)
+        return false;
+    if (declaredLocation.terminalApp && current.terminalApp !== declaredLocation.terminalApp)
+        return false;
+    if (config.sessionLocation.verifyTab && declaredLocation.tabId && current.tabId !== declaredLocation.tabId)
+        return false;
+    // All checks passed
     return true;
 }

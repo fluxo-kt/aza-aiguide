@@ -5,6 +5,19 @@ import { homedir } from 'os'
 import { sanitizeSessionId, ensureStateDir } from './log'
 
 /**
+ * Terminal location snapshot captured at session start.
+ * Used for injection safety verification.
+ */
+export interface SessionLocation {
+  tmuxPane?: string      // tmux pane ID (e.g., "%3")
+  screenSession?: string // GNU Screen session name
+  terminalApp?: string   // macOS terminal process name (e.g., "iTerm2", "Terminal")
+  tabId?: string         // terminal tab identifier (iTerm2 UUID, Terminal.app index)
+  windowId?: string      // terminal window identifier
+  detectedAt: number     // timestamp of detection
+}
+
+/**
  * Persisted session config written at SessionStart, read by Stop/SubagentStop hooks.
  * Single source of truth — all hooks import from here.
  */
@@ -14,6 +27,7 @@ export interface SessionConfig {
   injectionTarget: string
   startedAt: number
   jsonlPath?: string           // cached JSONL path for context pressure reading (resolved at SessionStart)
+  location?: SessionLocation   // terminal location at session start
   disabledReason?: string
 }
 
