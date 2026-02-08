@@ -487,6 +487,60 @@ describe('bookmark-activity', () => {
       expect(cLines.length).toBe(0)
     })
 
+    test('burst compaction triggers at lower threshold than normal compaction', () => {
+      writeSessionConfig(TEST_SESSION_ID, stateDir, {
+        injectionMethod: 'tmux',
+        injectionTarget: '%1'
+      })
+
+      // Burst compaction uses compactPercent × 0.8 = 0.76 × 0.8 = 0.608
+      // Normal compaction uses compactPercent = 0.76
+      // Need pressure between 0.608 and 0.76 so burst fires but shouldCompact doesn't
+      // Fallback pressure = cumulativeTokens / (200000 × 0.25) = cumulativeTokens / 50000
+      // For pressure 0.65: need 32500 tokens = 130000 chars
+      const logPath = getLogPath(TEST_SESSION_ID, logDir)
+      const now = Date.now()
+      let logContent = ''
+      // 5 recent A lines (burst condition: 5+ in 10s)
+      for (let i = 0; i < 5; i++) {
+        logContent += `A ${now - 8000 + i * 1000} 26000\n`  // 130000 chars = 32500 tokens → ~65% pressure
+      }
+      writeFileSync(logPath, logContent)
+
+      const data = { output: 'test' }
+      handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
+
+      const log = readLog(TEST_SESSION_ID, logDir)
+      const lines = log.trim().split('\n')
+      const cLines = lines.filter(line => line.startsWith('C '))
+
+      // Burst should trigger at ~65% (> 60.8% burst threshold)
+      // Normal compaction would NOT trigger (65% < 76%)
+      expect(cLines.length).toBe(1)
+    })
+
+    test('does not inject when injectionMethod is detecting', () => {
+      // 'detecting' is the interim state during SessionStart setup
+      writeSessionConfig(TEST_SESSION_ID, stateDir, {
+        injectionMethod: 'detecting',
+        injectionTarget: ''
+      })
+
+      const data = { output: 'test' }
+
+      // Add enough A lines to exceed burst threshold
+      for (let i = 0; i < 5; i++) {
+        handleSubagentStop(TEST_SESSION_ID, data, logDir, stateDir)
+      }
+
+      const log = readLog(TEST_SESSION_ID, logDir)
+      const lines = log.trim().split('\n')
+      const iLines = lines.filter(line => line.startsWith('I '))
+
+      // Should NOT inject — 'detecting' is mapped to 'disabled'
+      expect(iLines.length).toBe(0)
+    })
+
     test('does not trigger when last line is bookmark', () => {
       writeSessionConfig(TEST_SESSION_ID, stateDir, {
         injectionMethod: 'tmux',

@@ -296,4 +296,23 @@ describe('resolveJsonlPath', () => {
     const noHome = '/tmp/tav-no-home-' + Date.now()
     expect(resolveJsonlPath('any-session', noHome)).toBeNull()
   })
+
+  test('returns most recent match by mtime when multiple hash dirs match', () => {
+    const sessionId = 'multi-match-session'
+    const path1 = join(tempDir, '.claude', 'projects', 'hash1', `${sessionId}.jsonl`)
+    const path2 = join(tempDir, '.claude', 'projects', 'hash2', `${sessionId}.jsonl`)
+
+    // Write to hash1 first, then hash2 — hash2 should have later mtime
+    writeFileSync(path1, '{"old": true}')
+    // Ensure different mtime by touching with a slight delay via content change
+    const futureTime = Date.now() + 10000
+    writeFileSync(path2, '{"new": true}')
+    // Force hash2 to have a later mtime
+    const { utimesSync } = require('fs')
+    utimesSync(path2, futureTime / 1000, futureTime / 1000)
+
+    const result = resolveJsonlPath(sessionId, tempDir)
+    // Should return hash2 (most recent mtime), not hash1 (first found)
+    expect(result).toBe(path2)
+  })
 })
