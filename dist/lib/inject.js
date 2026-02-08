@@ -159,13 +159,12 @@ function spawnDetached(command) {
 function requestBookmark(sessionId, injection, marker, stateDir) {
     if (injection.method === 'disabled')
         return false;
-    (0, log_1.appendEvent)(sessionId, `I ${Date.now()}`, stateDir);
     const command = buildInjectionCommand(injection.method, injection.target, marker);
-    if (command) {
-        spawnDetached(command);
-        return true;
-    }
-    return false;
+    if (!command)
+        return false;
+    (0, log_1.appendEvent)(sessionId, `I ${Date.now()}`, stateDir);
+    spawnDetached(command);
+    return true;
 }
 /**
  * High-level compaction injection: appends pre-spawn 'C' marker, builds
@@ -175,11 +174,10 @@ function requestBookmark(sessionId, injection, marker, stateDir) {
 function requestCompaction(sessionId, injection, stateDir) {
     if (injection.method === 'disabled')
         return false;
-    (0, log_1.appendEvent)(sessionId, `C ${Date.now()}`, stateDir);
     const command = buildInjectionCommand(injection.method, injection.target, '/compact');
-    if (command) {
-        spawnDetached(command);
-        return true;
-    }
-    return false;
+    if (!command)
+        return false;
+    (0, log_1.appendEvent)(sessionId, `C ${Date.now()}`, stateDir);
+    spawnDetached(command);
+    return true;
 }
